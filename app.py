@@ -3,7 +3,9 @@ import anthropic
 import pdfplumber
 import os
 import json
+import requests
 from io import BytesIO
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from docx import Document as DocxDocument
 from docx.shared import Pt, RGBColor, Inches
@@ -16,6 +18,8 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 load_dotenv()
 API_KEY = os.getenv("ANTHROPIC_API_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://adybtayirxocljwkydyg.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "sb_publishable_bJoFocdmuwRRtcrUwFtctA_kjGrBR7-")
 
 st.set_page_config(page_title="ProfileIQ — AI Resume Intelligence", page_icon="🎯", layout="wide")
 
@@ -27,10 +31,99 @@ defaults = {
     "rewrite_data": None, "docx_bytes": None, "pdf_bytes": None,
     "after_score": None, "after_matched": [], "after_missing": [],
     "processing": False,
+    # Auth
+    "user": None,
+    "access_token": None,
+    "profile": None,
+    "auth_view": "login",  # login | register | forgot
+    "show_support": False,
 }
+
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+# ══════════════════════════════════════
+# SUPABASE AUTH HELPERS
+# ══════════════════════════════════════
+
+def sb_headers(token=None):
+    h = {"apikey": SUPABASE_KEY, "Content-Type": "application/json"}
+    if token:
+        h["Authorization"] = f"Bearer {token}"
+    else:
+        h["Authorization"] = f"Bearer {SUPABASE_KEY}"
+    return h
+
+def sb_register(email, password):
+    r = requests.post(f"{SUPABASE_URL}/auth/v1/signup",
+        headers=sb_headers(),
+        json={"email": email, "password": password})
+    return r.json()
+
+def sb_login(email, password):
+    r = requests.post(f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
+        headers=sb_headers(),
+        json={"email": email, "password": password})
+    return r.json()
+
+def sb_forgot_password(email):
+    r = requests.post(f"{SUPABASE_URL}/auth/v1/recover",
+        headers=sb_headers(),
+        json={"email": email})
+    return r.status_code == 200
+
+def sb_get_profile(token, user_id):
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{user_id}&select=*",
+        headers=sb_headers(token))
+    data = r.json()
+    return data[0] if data else None
+
+def sb_increment_scan(token, user_id, current_used):
+    requests.patch(f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{user_id}",
+        headers={**sb_headers(token), "Prefer": "return=minimal"},
+        json={"scans_used": current_used + 1})
+
+def sb_reset_scans_if_needed(token, user_id, profile):
+    reset_date = profile.get("scans_reset_date")
+    if reset_date:
+        rd = datetime.fromisoformat(reset_date)
+        now = datetime.now(timezone.utc).date()
+        if (now - rd.date()).days >= 30:
+            requests.patch(f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{user_id}",
+                headers={**sb_headers(token), "Prefer": "return=minimal"},
+                json={"scans_used": 0, "scans_reset_date": str(now)})
+            profile["scans_used"] = 0
+    return profile
+
+def sb_submit_support(email, ticket_type, message):
+    r = requests.post(f"{SUPABASE_URL}/rest/v1/support_tickets",
+        headers={**sb_headers(), "Prefer": "return=minimal"},
+        json={"user_email": email, "type": ticket_type, "message": message})
+    return r.status_code in [200, 201]
+
+def is_pro(profile):
+    if not profile: return False
+    if profile.get("plan") != "pro": return False
+    expires = profile.get("pro_expires_at")
+    if not expires: return False
+    exp = datetime.fromisoformat(expires.replace("Z", "+00:00"))
+    return exp > datetime.now(timezone.utc)
+
+def free_scans_left(profile):
+    if not profile: return 0
+    used = profile.get("scans_used", 0)
+    return max(0, 3 - used)
+
+def logout():
+    st.session_state.user = None
+    st.session_state.access_token = None
+    st.session_state.profile = None
+    st.session_state.analysis_result = None
+    st.session_state.rewrite_data = None
+    st.session_state.after_score = None
+    st.rerun()
+
 
 st.markdown("""
 <style>
@@ -573,6 +666,154 @@ def make_pdf(data):
         sec("CERTIFICATIONS & LANGUAGES"); story.append(Paragraph(str(data["certifications"]),bs))
     doc.build(story); buf.seek(0); return buf.read()
 
+# ══════════════════════════════════════
+# AUTH GATE — show login if not logged in
+# ══════════════════════════════════════
+
+def show_auth_page():
+    st.markdown("""
+<style>
+.auth-wrap { max-width: 420px; margin: 60px auto; }
+.auth-card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 16px; padding: 36px; }
+.auth-logo { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 28px; }
+.auth-logo-mark { background: #F59E0B; color: #1a1a1a; font-size: 14px; font-weight: 900; width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+.auth-title { font-size: 22px; font-weight: 900; color: #fff; text-align: center; margin-bottom: 6px; }
+.auth-sub { font-size: 13px; color: #666; text-align: center; margin-bottom: 28px; }
+.auth-divider { border: none; border-top: 1px solid #2a2a2a; margin: 20px 0; }
+.auth-switch { text-align: center; font-size: 13px; color: #666; margin-top: 16px; }
+.auth-switch a { color: #F59E0B; cursor: pointer; font-weight: 600; text-decoration: none; }
+.auth-error { background: #2a1010; border: 1px solid #5a2020; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #f87171; margin-bottom: 16px; }
+.auth-success { background: #0a2a1a; border: 1px solid #1a5a30; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #4ade80; margin-bottom: 16px; }
+.free-badge { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #F59E0B; text-align: center; margin-bottom: 20px; }
+</style>
+""", unsafe_allow_html=True)
+
+    st.markdown('<div class="auth-wrap"><div class="auth-card">', unsafe_allow_html=True)
+    st.markdown("""
+<div class="auth-logo">
+  <div class="auth-logo-mark">IQ</div>
+  <span style="font-size:20px;font-weight:900;color:#fff">Profile<span style="color:#F59E0B">IQ</span></span>
+</div>
+""", unsafe_allow_html=True)
+
+    view = st.session_state.auth_view
+
+    if view == "login":
+        st.markdown('<div class="auth-title">Welcome back</div>', unsafe_allow_html=True)
+        st.markdown('<div class="auth-sub">Sign in to your ProfileIQ account</div>', unsafe_allow_html=True)
+        email = st.text_input("Email", placeholder="you@email.com", key="login_email")
+        password = st.text_input("Password", type="password", placeholder="••••••••", key="login_pass")
+        if st.button("Sign in →", type="primary", use_container_width=True):
+            if email and password:
+                with st.spinner("Signing in..."):
+                    res = sb_login(email, password)
+                if "access_token" in res:
+                    st.session_state.access_token = res["access_token"]
+                    st.session_state.user = res["user"]
+                    profile = sb_get_profile(res["access_token"], res["user"]["id"])
+                    profile = sb_reset_scans_if_needed(res["access_token"], res["user"]["id"], profile or {})
+                    st.session_state.profile = profile
+                    st.rerun()
+                else:
+                    err = res.get("error_description", res.get("msg", "Invalid email or password"))
+                    st.markdown(f'<div class="auth-error">⚠️ {err}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="auth-error">⚠️ Please enter email and password</div>', unsafe_allow_html=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Forgot password?", use_container_width=True):
+                st.session_state.auth_view = "forgot"
+                st.rerun()
+        with col2:
+            if st.button("Create account", use_container_width=True):
+                st.session_state.auth_view = "register"
+                st.rerun()
+
+    elif view == "register":
+        st.markdown('<div class="auth-title">Create account</div>', unsafe_allow_html=True)
+        st.markdown('<div class="free-badge">✦ Free plan: 3 resume scans/month · No credit card needed</div>', unsafe_allow_html=True)
+        name = st.text_input("Full name", placeholder="Lakshmikanth KR", key="reg_name")
+        email = st.text_input("Email", placeholder="you@email.com", key="reg_email")
+        password = st.text_input("Password", type="password", placeholder="Min 6 characters", key="reg_pass")
+        if st.button("Create account →", type="primary", use_container_width=True):
+            if email and password and name:
+                if len(password) < 6:
+                    st.markdown('<div class="auth-error">⚠️ Password must be at least 6 characters</div>', unsafe_allow_html=True)
+                else:
+                    with st.spinner("Creating account..."):
+                        res = sb_register(email, password)
+                    if "id" in res or ("user" in res and res["user"]):
+                        # Auto login after register
+                        login_res = sb_login(email, password)
+                        if "access_token" in login_res:
+                            st.session_state.access_token = login_res["access_token"]
+                            st.session_state.user = login_res["user"]
+                            profile = sb_get_profile(login_res["access_token"], login_res["user"]["id"])
+                            st.session_state.profile = profile
+                            st.rerun()
+                        else:
+                            st.markdown('<div class="auth-success">✓ Account created! Please sign in.</div>', unsafe_allow_html=True)
+                            st.session_state.auth_view = "login"
+                    else:
+                        err = res.get("msg", res.get("error_description", "Registration failed"))
+                        st.markdown(f'<div class="auth-error">⚠️ {err}</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="auth-error">⚠️ Please fill all fields</div>', unsafe_allow_html=True)
+        if st.button("← Back to sign in", use_container_width=True):
+            st.session_state.auth_view = "login"
+            st.rerun()
+
+    elif view == "forgot":
+        st.markdown('<div class="auth-title">Reset password</div>', unsafe_allow_html=True)
+        st.markdown('<div class="auth-sub">Enter your email and we will send a reset link</div>', unsafe_allow_html=True)
+        email = st.text_input("Email", placeholder="you@email.com", key="forgot_email")
+        if st.button("Send reset link →", type="primary", use_container_width=True):
+            if email:
+                ok = sb_forgot_password(email)
+                if ok:
+                    st.markdown('<div class="auth-success">✓ Reset link sent! Check your email.</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div class="auth-error">⚠️ Could not send reset email</div>', unsafe_allow_html=True)
+        if st.button("← Back to sign in", use_container_width=True):
+            st.session_state.auth_view = "login"
+            st.rerun()
+
+    st.markdown('</div></div>', unsafe_allow_html=True)
+
+# Show auth page if not logged in
+if not st.session_state.user:
+    show_auth_page()
+    st.stop()
+
+# ── Refresh profile ──
+profile = st.session_state.profile or {}
+user_email = st.session_state.user.get("email", "")
+user_is_pro = is_pro(profile)
+scans_left = free_scans_left(profile) if not user_is_pro else 999
+
+# ── SUPPORT MODAL ──
+def show_support_form():
+    st.markdown("---")
+    st.markdown("### 💬 Support")
+    ticket_type = st.selectbox("Type", ["Feedback", "Bug Report", "Feature Request", "Other"], key="support_type")
+    message = st.text_area("Message", placeholder="Tell us what's on your mind...", height=120, key="support_msg")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Submit", type="primary", use_container_width=True):
+            if message.strip():
+                ok = sb_submit_support(user_email, ticket_type, message)
+                if ok:
+                    st.success("✓ Submitted! We'll get back to you at " + user_email)
+                    st.session_state.show_support = False
+                else:
+                    st.error("Failed to submit. Please try again.")
+            else:
+                st.warning("Please enter a message")
+    with c2:
+        if st.button("Cancel", use_container_width=True):
+            st.session_state.show_support = False
+            st.rerun()
+
 # ── BUILD DYNAMIC HERO PANEL ──
 before_score = st.session_state.analysis_result["score"] if st.session_state.analysis_result else None
 after_score  = st.session_state.after_score
@@ -637,6 +878,36 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# ── USER TOP BAR ──
+plan_color = "#22c55e" if user_is_pro else "#F59E0B"
+plan_label = "PRO" if user_is_pro else "FREE"
+scans_info = "" if user_is_pro else f" &nbsp;|&nbsp; {scans_left} free scans left"
+
+col_u1, col_u2, col_u3 = st.columns([4, 1, 1])
+with col_u1:
+    st.markdown(
+        f'<div style="font-size:12px;color:#666;padding:6px 0">'
+        f'<b style="color:#fff">{user_email}</b>'
+        f'&nbsp;&nbsp;'
+        f'<span style="background:{plan_color}22;color:{plan_color};border:1px solid {plan_color}44;'
+        f'font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">{plan_label}</span>'
+        f'<span style="color:#555">{scans_info}</span>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
+with col_u2:
+    if st.button("Support", use_container_width=True, key="btn_support"):
+        st.session_state.show_support = not st.session_state.show_support
+        st.rerun()
+with col_u3:
+    if st.button("Sign out", use_container_width=True, key="btn_logout"):
+        logout()
+
+if st.session_state.show_support:
+    show_support_form()
+
+st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
 # ── INPUTS ──
 col1, col2 = st.columns(2, gap="medium")
 with col1:
@@ -677,9 +948,8 @@ if tab_choice == "✨  Rewrite with AI" and not has_score:
 </div>
 """, unsafe_allow_html=True)
 
-# ── JS: Fix expander label overlap only (upload button fixed via CSS) ──
-import streamlit.components.v1 as components
-components.html("""
+# ── JS: injected via st.markdown so it runs in main page (not iframe) ──
+st.markdown("""
 <script>
 function fixUploadButton() {
     var btn = document.querySelector('[data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"]');
@@ -718,7 +988,7 @@ setTimeout(fixExpander, 600);
 setTimeout(fixExpander, 1200);
 setInterval(fixExpander, 2500);
 </script>
-""", height=0)
+""", unsafe_allow_html=True)
 
 def validate():
     ok = True
@@ -753,8 +1023,12 @@ if tab_choice == "📊  Score my resume":
                 st.markdown('<div class="info-badge">ℹ️ Already analyzed this combination. Change the resume or JD to analyze again.</div>', unsafe_allow_html=True)
             else:
                 st.session_state.processing = True
-                with st.spinner("🔍 Analyzing your resume against the job description..."):
+                with st.spinner("Analyzing your resume against the job description..."):
                     try:
+                        # Check scan limit for free users
+                        if not user_is_pro and scans_left <= 0:
+                            st.markdown('<div class="warn-badge">You have used all 3 free scans this month. Upgrade to Pro for unlimited scans.</div>', unsafe_allow_html=True)
+                            st.stop()
                         rt = extract_text(resume_file)
                         scored = score_resume(rt, jd_text)
                         sugs   = get_suggestions(rt, jd_text, scored["score"], scored["missing"])
@@ -762,6 +1036,9 @@ if tab_choice == "📊  Score my resume":
                         st.session_state.analysis_result = scored
                         st.session_state.last_analyzed_file = get_file_id(resume_file)
                         st.session_state.last_analyzed_jd = jd_text.strip()
+                        # Increment scan count for free users
+                        if not user_is_pro:
+                            sb_increment_scan(st.session_state.access_token, st.session_state.user["id"], profile.get("scans_used", 0))
                     except Exception as e:
                         st.error(f"⚠️ Error: {str(e)[:200]}")
                     finally:
@@ -811,9 +1088,22 @@ if tab_choice == "📊  Score my resume":
 # REWRITE TAB
 # ════════════════════════
 elif tab_choice == "✨  Rewrite with AI" and has_score:
+    # Show upgrade banner for free users
+    if not user_is_pro:
+        st.markdown("""
+<div style="background:#2a1f0a;border:1px solid #5a4010;border-radius:10px;padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">
+  <div>
+    <div style="color:#F59E0B;font-weight:700;font-size:13px;margin-bottom:3px">Pro feature — AI Resume Rewrite</div>
+    <div style="color:#888;font-size:12px">Upgrade to Pro (Rs.199/month) to unlock unlimited rewrites, PDF/DOCX downloads and more.</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+        st.link_button("Upgrade to Pro → Rs.199/month", "YOUR_RAZORPAY_LINK", use_container_width=True)
+        st.stop()
+
     c3, c4 = st.columns([5,1], gap="small")
     with c3:
-        rewrite_clicked = st.button("Rewrite with AI →", type="primary",
+        rewrite_clicked = st.button("Rewrite with AI ->", type="primary",
             use_container_width=True, key="btn_rewrite",
             disabled=st.session_state.processing)
     with c4:
