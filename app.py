@@ -19,7 +19,8 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 load_dotenv()
 API_KEY = os.getenv("ANTHROPIC_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://adybtayirxocljwkydyg.supabase.co")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "sb_publishable_bJoFocdmuwRRtcrUwFtctA_kjGrBR7-")
+# SUPABASE_KEY must be set in Streamlit secrets as the legacy anon key (eyJ...)
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 
 st.set_page_config(page_title="ProfileIQ — AI Resume Intelligence", page_icon="🎯", layout="wide")
 
@@ -673,18 +674,32 @@ def make_pdf(data):
 def show_auth_page():
     st.markdown("""
 <style>
-.auth-wrap { max-width: 420px; margin: 60px auto; }
-.auth-card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 16px; padding: 36px; }
-.auth-logo { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 28px; }
-.auth-logo-mark { background: #F59E0B; color: #1a1a1a; font-size: 14px; font-weight: 900; width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+/* ── AUTH PAGE ── */
+[data-testid="stAppViewContainer"] > div:first-child { padding-top: 0 !important; }
+.auth-wrap { max-width: 400px; margin: 0 auto; padding: 40px 16px; }
+.auth-card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 16px; padding: 32px; }
+.auth-logo { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 24px; }
+.auth-logo-mark { background: #F59E0B; color: #1a1a1a; font-size: 14px; font-weight: 900; width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+.auth-logo-text { font-size: 28px; font-weight: 900; color: #fff; letter-spacing: -1px; }
+.auth-logo-text span { color: #F59E0B; }
 .auth-title { font-size: 22px; font-weight: 900; color: #fff; text-align: center; margin-bottom: 6px; }
-.auth-sub { font-size: 13px; color: #666; text-align: center; margin-bottom: 28px; }
-.auth-divider { border: none; border-top: 1px solid #2a2a2a; margin: 20px 0; }
-.auth-switch { text-align: center; font-size: 13px; color: #666; margin-top: 16px; }
-.auth-switch a { color: #F59E0B; cursor: pointer; font-weight: 600; text-decoration: none; }
-.auth-error { background: #2a1010; border: 1px solid #5a2020; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #f87171; margin-bottom: 16px; }
-.auth-success { background: #0a2a1a; border: 1px solid #1a5a30; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #4ade80; margin-bottom: 16px; }
+.auth-sub { font-size: 13px; color: #666; text-align: center; margin-bottom: 24px; }
+.auth-error { background: #2a1010; border: 1px solid #5a2020; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #f87171; margin-bottom: 12px; }
+.auth-success { background: #0a2a1a; border: 1px solid #1a5a30; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #4ade80; margin-bottom: 12px; }
 .free-badge { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #F59E0B; text-align: center; margin-bottom: 20px; }
+/* Fix input widths */
+.stTextInput > div > div > input { font-size: 13px !important; }
+/* Hide streamlit branding */
+footer { display: none !important; }
+[data-testid="InputInstructions"] { display: none !important; }
+[data-testid="stPasswordFieldToggle"] span { display: none !important; }
+#MainMenu { display: none !important; }
+[data-testid="stToolbar"] { display: none !important; }
+/* Responsive */
+@media (max-width: 480px) {
+    .auth-card { padding: 24px 16px; }
+    .auth-wrap { padding: 20px 8px; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -692,7 +707,7 @@ def show_auth_page():
     st.markdown("""
 <div class="auth-logo">
   <div class="auth-logo-mark">IQ</div>
-  <span style="font-size:20px;font-weight:900;color:#fff">Profile<span style="color:#F59E0B">IQ</span></span>
+  <div class="auth-logo-text">Profile<span>IQ</span></div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -732,7 +747,7 @@ def show_auth_page():
     elif view == "register":
         st.markdown('<div class="auth-title">Create account</div>', unsafe_allow_html=True)
         st.markdown('<div class="free-badge">✦ Free plan: 3 resume scans/month · No credit card needed</div>', unsafe_allow_html=True)
-        name = st.text_input("Full name", placeholder="Lakshmikanth KR", key="reg_name")
+        name = st.text_input("Full name", placeholder="Your full name", key="reg_name")
         email = st.text_input("Email", placeholder="you@email.com", key="reg_email")
         password = st.text_input("Password", type="password", placeholder="Min 6 characters", key="reg_pass")
         if st.button("Create account →", type="primary", use_container_width=True):
@@ -742,20 +757,29 @@ def show_auth_page():
                 else:
                     with st.spinner("Creating account..."):
                         res = sb_register(email, password)
-                    if "id" in res or ("user" in res and res["user"]):
-                        # Auto login after register
+                    # Supabase returns user object directly or nested
+                    user_obj = res.get("user") or res
+                    if user_obj.get("id"):
+                        # Auto login
                         login_res = sb_login(email, password)
                         if "access_token" in login_res:
                             st.session_state.access_token = login_res["access_token"]
                             st.session_state.user = login_res["user"]
-                            profile = sb_get_profile(login_res["access_token"], login_res["user"]["id"])
+                            uid = login_res["user"]["id"]
+                            token = login_res["access_token"]
+                            # Update name in profile
+                            requests.patch(f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{uid}",
+                                headers={**sb_headers(token), "Prefer": "return=minimal"},
+                                json={"full_name": name})
+                            profile = sb_get_profile(token, uid)
                             st.session_state.profile = profile
                             st.rerun()
                         else:
-                            st.markdown('<div class="auth-success">✓ Account created! Please sign in.</div>', unsafe_allow_html=True)
+                            st.markdown('<div class="auth-success">Account created! Please sign in.</div>', unsafe_allow_html=True)
                             st.session_state.auth_view = "login"
+                            st.rerun()
                     else:
-                        err = res.get("msg", res.get("error_description", "Registration failed"))
+                        err = res.get("msg", res.get("error_description", res.get("error", "Registration failed. Email may already be registered.")))
                         st.markdown(f'<div class="auth-error">⚠️ {err}</div>', unsafe_allow_html=True)
             else:
                 st.markdown('<div class="auth-error">⚠️ Please fill all fields</div>', unsafe_allow_html=True)
