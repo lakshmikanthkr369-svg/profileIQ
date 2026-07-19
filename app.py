@@ -1058,54 +1058,37 @@ scans_info = "" if user_is_pro else f"{scans_left} free scans left"
 
 st.markdown(f"""
 <style>
-/* Amber outline button style for support/signout */
-[data-testid="stButton"] button[kind="secondary"].amber-btn {{
+/* Amber outline for support/signout */
+div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button {{
     background: transparent !important;
     border: 1.5px solid #F59E0B !important;
     color: #F59E0B !important;
     font-size: 11px !important;
     font-weight: 700 !important;
-    padding: 5px 14px !important;
+    padding: 6px 16px !important;
     border-radius: 6px !important;
 }}
 </style>
-<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;margin-bottom:8px;border-bottom:1px solid #2a2a2a">
+<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;margin-bottom:12px;border-bottom:1px solid #2a2a2a">
   <div style="font-size:12px;color:#888">
     <b style="color:#fff">{user_email}</b>
     &nbsp;
     <span style="background:{plan_color}22;color:{plan_color};border:1px solid {plan_color}44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">{plan_label}</span>
     {f'&nbsp;<span style="color:#666;font-size:11px">{scans_info}</span>' if not user_is_pro else ''}
   </div>
-  <div id="user-btn-placeholder"></div>
+  <div style="display:flex;gap:8px">
+    <div id="support-btn-placeholder"></div>
+    <div id="signout-btn-placeholder"></div>
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
-# Buttons aligned to top right using columns
-_, btn_col2, btn_col3 = st.columns([6, 0.8, 0.8])
-with btn_col2:
-    st.markdown("""
-<style>
-div[data-testid="stButton"]:has(button#support_btn) button,
-div[data-testid="stButton"]:has(button#logout_btn) button {
-    background: transparent !important;
-    border: 1.5px solid #F59E0B !important;
-    color: #F59E0B !important;
-    font-size: 11px !important;
-    font-weight: 700 !important;
-    border-radius: 6px !important;
-    padding: 5px 14px !important;
-    white-space: nowrap !important;
-}
-div[data-testid="stButton"]:has(button#support_btn) button:hover,
-div[data-testid="stButton"]:has(button#logout_btn) button:hover {
-    background: #F59E0B22 !important;
-}
-</style>
-""", unsafe_allow_html=True)
+user_col1, user_col2, user_col3 = st.columns([7, 1, 1])
+with user_col2:
     if st.button("Support", use_container_width=True, key="btn_support"):
         st.session_state.show_support = not st.session_state.show_support
         st.rerun()
-with btn_col3:
+with user_col3:
     if st.button("Sign out", use_container_width=True, key="btn_logout"):
         logout()
 
