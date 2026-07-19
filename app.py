@@ -1208,10 +1208,10 @@ if tab_choice == "📊  Score my resume":
             st.markdown("""
 <div style="background:#2a1010;border:1px solid #5a2020;border-radius:10px;padding:16px 20px;margin-bottom:12px;text-align:center">
   <div style="color:#f87171;font-weight:700;font-size:14px;margin-bottom:6px">You have used all 3 free scans this month</div>
-  <div style="color:#888;font-size:12px;margin-bottom:12px">Upgrade to Pro for unlimited scans, AI rewrite and downloads</div>
+  <div style="color:#888;font-size:12px;margin-bottom:12px">Upgrade to Pro for unlimited scans, AI rewrite and downloads.<br><span style="color:#F59E0B;font-size:11px">⚠️ Use your ProfileIQ email when paying</span></div>
 </div>
 """, unsafe_allow_html=True)
-            st.link_button("Upgrade to Pro — Rs.199/month", f"https://rzp.io/rzp/TFKQxBIOLtsH7u?prefill[email]={user_email}&prefill[contact]=", use_container_width=True)
+            st.link_button("Upgrade to Pro — Rs.199/month", "https://rzp.io/rzp/TFKQxBIOLtsH7u", use_container_width=True)
             analyze_clicked = False
         else:
             analyze_clicked = st.button("Analyze now", type="primary",
@@ -1310,7 +1310,7 @@ elif tab_choice == "✨  Rewrite with AI" and has_score:
   </div>
 </div>
 """, unsafe_allow_html=True)
-        st.link_button("Upgrade to Pro — Rs.199/month", f"https://rzp.io/rzp/TFKQxBIOLtsH7u?prefill[email]={user_email}&prefill[contact]=", use_container_width=True)
+        st.link_button("Upgrade to Pro — Rs.199/month", "https://rzp.io/rzp/TFKQxBIOLtsH7u", use_container_width=True)
         st.stop()
 
     c3, c4 = st.columns([5,1], gap="small")
