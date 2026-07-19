@@ -17,10 +17,20 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 load_dotenv()
-API_KEY = os.getenv("ANTHROPIC_API_KEY")
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://adybtayirxocljwkydyg.supabase.co")
-# SUPABASE_KEY must be set in Streamlit secrets as the legacy anon key (eyJ...)
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+try:
+    API_KEY = st.secrets["ANTHROPIC_API_KEY"]
+except:
+    API_KEY = os.getenv("ANTHROPIC_API_KEY")
+
+try:
+    SUPABASE_URL = st.secrets.get("SUPABASE_URL", "https://adybtayirxocljwkydyg.supabase.co")
+except:
+    SUPABASE_URL = os.getenv("SUPABASE_URL", "https://adybtayirxocljwkydyg.supabase.co")
+
+try:
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+except:
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkeWJ0YXlpcnhvY2xqd2t5ZHlnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NDEzMTM4MCwiZXhwIjoyMDk5NzA3MzgwfQ.sW_EkD71c8jJP1XM35PH5MYAkK8S0ThJlgQwe94hA_E")
 
 st.set_page_config(page_title="ProfileIQ — AI Resume Intelligence", page_icon="🎯", layout="wide")
 
@@ -69,10 +79,16 @@ def sb_login(email, password):
     return r.json()
 
 def sb_forgot_password(email):
+    # Validate email format first
+    if not email or '@' not in email or '.' not in email.split('@')[-1]:
+        return 'invalid'
     r = requests.post(f"{SUPABASE_URL}/auth/v1/recover",
         headers=sb_headers(),
-        json={"email": email})
-    return r.status_code == 200
+        json={"email": email,
+              "redirect_to": "https://profileiq.co.in/app.html"})
+    # Supabase returns 200 even for unknown emails (security by design)
+    # We return True so user always sees success (prevents email enumeration)
+    return 'sent' if r.status_code == 200 else 'error'
 
 def sb_get_profile(token, user_id):
     r = requests.get(f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{user_id}&select=*",
@@ -98,10 +114,26 @@ def sb_reset_scans_if_needed(token, user_id, profile):
     return profile
 
 def sb_submit_support(email, ticket_type, message):
+    # Save to Supabase
     r = requests.post(f"{SUPABASE_URL}/rest/v1/support_tickets",
         headers={**sb_headers(), "Prefer": "return=minimal"},
         json={"user_email": email, "type": ticket_type, "message": message})
-    return r.status_code in [200, 201]
+    saved = r.status_code in [200, 201]
+    
+    # Send email notification via Resend
+    try:
+        RESEND_KEY = st.secrets.get("RESEND_API_KEY", os.getenv("RESEND_API_KEY", ""))
+        if RESEND_KEY:
+            requests.post("https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {RESEND_KEY}", "Content-Type": "application/json"},
+                json={
+                    "from": "ProfileIQ <noreply@profileiq.co.in>",
+                    "to": ["support@profileiq.co.in"],
+                    "subject": f"[ProfileIQ Support] {ticket_type} from {email}",
+                    "html": f"<p><b>From:</b> {email}</p><p><b>Type:</b> {ticket_type}</p><p><b>Message:</b><br>{message}</p>"
+                })
+    except: pass
+    return saved
 
 def is_pro(profile):
     if not profile: return False
@@ -133,6 +165,19 @@ st.markdown("""
 .stApp { background: #111 !important; }
 #MainMenu, footer, header { visibility: hidden; }
 .block-container { padding: 1.5rem 2rem 4rem !important; max-width: 1080px !important; }
+/* Fix password toggle visibili text */
+button[aria-label="Show password"],
+button[aria-label="Hide password"] { display: none !important; }
+/* Fix button text wrapping */
+.stButton > button { white-space: nowrap !important; }
+
+/* ── GLOBAL FIXES ── */
+/* Hide password visibility toggle everywhere */
+[data-testid="stPasswordFieldToggle"] { display: none !important; }
+/* Hide InputInstructions */
+[data-testid="InputInstructions"] { display: none !important; }
+/* Fix button text wrapping */
+.stButton > button { white-space: nowrap !important; }
 
 /* ── HERO ── */
 .hero { display: grid; grid-template-columns: 1.1fr 1fr; border-radius: 16px; overflow: hidden; margin-bottom: 20px; min-height: 250px; }
@@ -674,135 +719,204 @@ def make_pdf(data):
 def show_auth_page():
     st.markdown("""
 <style>
-/* ── AUTH PAGE ── */
-[data-testid="stAppViewContainer"] > div:first-child { padding-top: 0 !important; }
-.auth-wrap { max-width: 400px; margin: 0 auto; padding: 40px 16px; }
-.auth-card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 16px; padding: 32px; }
-.auth-logo { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 24px; }
+.stApp { background: #0e0e0e !important; }
+#MainMenu, footer { visibility: hidden !important; }
+header[data-testid="stHeader"] { display: none !important; }
+[data-testid="stToolbar"] { display: none !important; }
+[data-testid="InputInstructions"] { display: none !important; }
+/* Password visibility icon fix */
+/* Constrain input width - works with st.columns */
+[data-testid="stTextInput"] { max-width: 100% !important; }
+[data-testid="stTextInput"] input { 
+    max-width: 100% !important;
+    font-size: 14px !important;
+    padding: 10px 12px !important;
+    background: #1e1e1e !important;
+    border: 1px solid #333 !important;
+    border-radius: 8px !important;
+    color: #fff !important;
+}
+[data-testid="stTextInput"] input:focus { border-color: #F59E0B !important; box-shadow: none !important; }
+[data-testid="stTextInput"] input::placeholder { color: #555 !important; }
+/* Password field same styling */
+[data-testid="stTextInputRootElement"] input,
+[data-baseweb="input"] input { 
+    background: #1e1e1e !important;
+    border-color: #333 !important;
+}
+/* Hide password toggle button completely - removes "visibili" text */
+[data-testid="stPasswordFieldToggle"] { display: none !important; }
+/* Remove extra padding */
+.block-container { padding-top: 2rem !important; padding-bottom: 1rem !important; }
+/* Auth styles */
+.auth-logo { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 20px; }
 .auth-logo-mark { background: #F59E0B; color: #1a1a1a; font-size: 14px; font-weight: 900; width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
 .auth-logo-text { font-size: 28px; font-weight: 900; color: #fff; letter-spacing: -1px; }
 .auth-logo-text span { color: #F59E0B; }
-.auth-title { font-size: 22px; font-weight: 900; color: #fff; text-align: center; margin-bottom: 6px; }
-.auth-sub { font-size: 13px; color: #666; text-align: center; margin-bottom: 24px; }
+.auth-title { font-size: 22px; font-weight: 900; color: #fff; text-align: center; margin-bottom: 4px; }
+.auth-sub { font-size: 13px; color: #666; text-align: center; margin-bottom: 20px; }
+.free-badge { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 8px; padding: 8px 14px; font-size: 12px; color: #F59E0B; text-align: center; margin-bottom: 16px; }
 .auth-error { background: #2a1010; border: 1px solid #5a2020; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #f87171; margin-bottom: 12px; }
 .auth-success { background: #0a2a1a; border: 1px solid #1a5a30; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #4ade80; margin-bottom: 12px; }
-.free-badge { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #F59E0B; text-align: center; margin-bottom: 20px; }
-/* Fix input widths */
-.stTextInput > div > div > input { font-size: 13px !important; }
-/* Hide streamlit branding */
-footer { display: none !important; }
-[data-testid="InputInstructions"] { display: none !important; }
-[data-testid="stPasswordFieldToggle"] span { display: none !important; }
-#MainMenu { display: none !important; }
-[data-testid="stToolbar"] { display: none !important; }
-/* Responsive */
-@media (max-width: 480px) {
-    .auth-card { padding: 24px 16px; }
-    .auth-wrap { padding: 20px 8px; }
-}
 </style>
 """, unsafe_allow_html=True)
 
-    st.markdown('<div class="auth-wrap"><div class="auth-card">', unsafe_allow_html=True)
-    st.markdown("""
+    # Use columns to constrain width - this is the ONLY reliable way in Streamlit
+    _, col, _ = st.columns([1, 1.5, 1])
+    with col:
+        st.markdown("""
 <div class="auth-logo">
   <div class="auth-logo-mark">IQ</div>
   <div class="auth-logo-text">Profile<span>IQ</span></div>
 </div>
 """, unsafe_allow_html=True)
 
-    view = st.session_state.auth_view
+        view = st.session_state.auth_view
 
-    if view == "login":
-        st.markdown('<div class="auth-title">Welcome back</div>', unsafe_allow_html=True)
-        st.markdown('<div class="auth-sub">Sign in to your ProfileIQ account</div>', unsafe_allow_html=True)
-        email = st.text_input("Email", placeholder="you@email.com", key="login_email")
-        password = st.text_input("Password", type="password", placeholder="••••••••", key="login_pass")
-        if st.button("Sign in →", type="primary", use_container_width=True):
-            if email and password:
-                with st.spinner("Signing in..."):
-                    res = sb_login(email, password)
-                if "access_token" in res:
-                    st.session_state.access_token = res["access_token"]
-                    st.session_state.user = res["user"]
-                    profile = sb_get_profile(res["access_token"], res["user"]["id"])
-                    profile = sb_reset_scans_if_needed(res["access_token"], res["user"]["id"], profile or {})
-                    st.session_state.profile = profile
+        if view == "login":
+            st.markdown('<div class="auth-title">Welcome back</div>', unsafe_allow_html=True)
+            st.markdown('<div class="auth-sub">Sign in to your ProfileIQ account</div>', unsafe_allow_html=True)
+            email = st.text_input("Email", placeholder="you@email.com", key="login_email")
+            password = st.text_input("Password", type="password", placeholder="Enter password", key="login_pass")
+            if st.button("Sign in", type="primary", use_container_width=True):
+                if email and password:
+                    with st.spinner("Signing in..."):
+                        res = sb_login(email, password)
+                    if "access_token" in res:
+                        st.session_state.access_token = res["access_token"]
+                        st.session_state.user = res["user"]
+                        profile = sb_get_profile(res["access_token"], res["user"]["id"])
+                        profile = sb_reset_scans_if_needed(res["access_token"], res["user"]["id"], profile or {})
+                        st.session_state.profile = profile
+                        st.rerun()
+                    else:
+                        err = res.get("error_description", res.get("msg", "Invalid email or password"))
+                        st.markdown(f'<div class="auth-error">⚠️ {err}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div class="auth-error">⚠️ Please enter email and password</div>', unsafe_allow_html=True)
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Forgot password?", use_container_width=True):
+                    st.session_state.auth_view = "forgot"
+                    st.rerun()
+            with c2:
+                if st.button("Create account", use_container_width=True):
+                    st.session_state.auth_view = "register"
+                    st.rerun()
+
+        elif view == "register":
+            st.markdown('<div class="auth-title">Create account</div>', unsafe_allow_html=True)
+            st.markdown('<div class="free-badge">Free plan: 3 resume scans/month | No credit card needed</div>', unsafe_allow_html=True)
+            name = st.text_input("Full name", placeholder="Your full name", key="reg_name")
+            email = st.text_input("Email", placeholder="you@email.com", key="reg_email")
+            password = st.text_input("Password", type="password", placeholder="Min 6 characters", key="reg_pass")
+            if st.button("Create account", type="primary", use_container_width=True):
+                if email and password and name:
+                    if len(password) < 6:
+                        st.markdown('<div class="auth-error">⚠️ Password must be at least 6 characters</div>', unsafe_allow_html=True)
+                    else:
+                        with st.spinner("Creating account..."):
+                            res = sb_register(email, password)
+                        user_obj = res.get("user") or res
+                        has_user = bool(user_obj.get("id")) or bool(res.get("id"))
+                        if has_user:
+                            login_res = sb_login(email, password)
+                            if "access_token" in login_res:
+                                st.session_state.access_token = login_res["access_token"]
+                                st.session_state.user = login_res["user"]
+                                uid = login_res["user"]["id"]
+                                token = login_res["access_token"]
+                                requests.patch(f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{uid}",
+                                    headers={**sb_headers(token), "Prefer": "return=minimal"},
+                                    json={"full_name": name})
+                                profile = sb_get_profile(token, uid)
+                                st.session_state.profile = profile
+                                st.rerun()
+                            else:
+                                st.markdown('<div class="auth-success">Account created! Please sign in.</div>', unsafe_allow_html=True)
+                                st.session_state.auth_view = "login"
+                                st.rerun()
+                        else:
+                            raw_err = res.get("msg", res.get("error_description", res.get("error", "")))
+                            if "already" in str(raw_err).lower() or not raw_err:
+                                err = "This email is already registered. Please sign in instead."
+                            else:
+                                err = raw_err
+                            st.markdown(f'<div class="auth-error">⚠️ {err}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div class="auth-error">⚠️ Please fill all fields</div>', unsafe_allow_html=True)
+            if st.button("Back to sign in", use_container_width=True):
+                st.session_state.auth_view = "login"
+                st.rerun()
+
+        elif view == "forgot":
+            st.markdown('<div class="auth-title">Reset password</div>', unsafe_allow_html=True)
+            st.markdown('<div class="auth-sub">Enter your registered email to receive a reset link</div>', unsafe_allow_html=True)
+            email = st.text_input("Email", placeholder="you@email.com", key="forgot_email")
+            if st.button("Send reset link", type="primary", use_container_width=True):
+                if not email:
+                    st.markdown('<div class="auth-error">⚠️ Please enter your email address</div>', unsafe_allow_html=True)
+                elif '@' not in email or '.' not in email.split('@')[-1]:
+                    st.markdown('<div class="auth-error">⚠️ Please enter a valid email address</div>', unsafe_allow_html=True)
+                else:
+                    result = sb_forgot_password(email)
+                    if result == 'invalid':
+                        st.markdown('<div class="auth-error">⚠️ Please enter a valid email address</div>', unsafe_allow_html=True)
+                    elif result == 'sent':
+                        st.markdown('<div class="auth-success">✓ If this email is registered, you will receive a reset link shortly. Check your inbox.</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div class="auth-error">⚠️ Something went wrong. Please try again.</div>', unsafe_allow_html=True)
+            if st.button("Back to sign in", use_container_width=True):
+                st.session_state.auth_view = "login"
+                st.rerun()
+
+
+def show_reset_password_page():
+    token = st.query_params.get("reset_token", "")
+    _, col, _ = st.columns([1, 1.5, 1])
+    with col:
+        st.markdown('''
+<div class="auth-logo">
+  <div class="auth-logo-mark">IQ</div>
+  <div class="auth-logo-text">Profile<span>IQ</span></div>
+</div>
+<div class="auth-title">Set new password</div>
+<div class="auth-sub">Enter your new password below</div>
+''', unsafe_allow_html=True)
+        if not token:
+            st.markdown('<div class="auth-error">⚠️ Invalid or expired link. Please request a new one.</div>', unsafe_allow_html=True)
+            if st.button("Back to sign in", use_container_width=True):
+                st.query_params.clear()
+                st.rerun()
+            return
+        new_pass = st.text_input("New password", type="password", placeholder="Min 6 characters", key="new_pass")
+        confirm_pass = st.text_input("Confirm password", type="password", placeholder="Repeat password", key="confirm_pass")
+        if st.button("Update password", type="primary", use_container_width=True):
+            if not new_pass or not confirm_pass:
+                st.markdown('<div class="auth-error">⚠️ Please fill both fields</div>', unsafe_allow_html=True)
+            elif len(new_pass) < 6:
+                st.markdown('<div class="auth-error">⚠️ Password must be at least 6 characters</div>', unsafe_allow_html=True)
+            elif new_pass != confirm_pass:
+                st.markdown('<div class="auth-error">⚠️ Passwords do not match</div>', unsafe_allow_html=True)
+            else:
+                r = requests.put(f"{SUPABASE_URL}/auth/v1/user",
+                    headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    json={"password": new_pass})
+                if r.status_code == 200:
+                    st.markdown('<div class="auth-success">✓ Password updated! Please sign in.</div>', unsafe_allow_html=True)
+                    import time; time.sleep(2)
+                    st.query_params.clear()
                     st.rerun()
                 else:
-                    err = res.get("error_description", res.get("msg", "Invalid email or password"))
-                    st.markdown(f'<div class="auth-error">⚠️ {err}</div>', unsafe_allow_html=True)
-            else:
-                st.markdown('<div class="auth-error">⚠️ Please enter email and password</div>', unsafe_allow_html=True)
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Forgot password?", use_container_width=True):
-                st.session_state.auth_view = "forgot"
-                st.rerun()
-        with col2:
-            if st.button("Create account", use_container_width=True):
-                st.session_state.auth_view = "register"
-                st.rerun()
-
-    elif view == "register":
-        st.markdown('<div class="auth-title">Create account</div>', unsafe_allow_html=True)
-        st.markdown('<div class="free-badge">✦ Free plan: 3 resume scans/month · No credit card needed</div>', unsafe_allow_html=True)
-        name = st.text_input("Full name", placeholder="Your full name", key="reg_name")
-        email = st.text_input("Email", placeholder="you@email.com", key="reg_email")
-        password = st.text_input("Password", type="password", placeholder="Min 6 characters", key="reg_pass")
-        if st.button("Create account →", type="primary", use_container_width=True):
-            if email and password and name:
-                if len(password) < 6:
-                    st.markdown('<div class="auth-error">⚠️ Password must be at least 6 characters</div>', unsafe_allow_html=True)
-                else:
-                    with st.spinner("Creating account..."):
-                        res = sb_register(email, password)
-                    # Supabase returns user object directly or nested
-                    user_obj = res.get("user") or res
-                    if user_obj.get("id"):
-                        # Auto login
-                        login_res = sb_login(email, password)
-                        if "access_token" in login_res:
-                            st.session_state.access_token = login_res["access_token"]
-                            st.session_state.user = login_res["user"]
-                            uid = login_res["user"]["id"]
-                            token = login_res["access_token"]
-                            # Update name in profile
-                            requests.patch(f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{uid}",
-                                headers={**sb_headers(token), "Prefer": "return=minimal"},
-                                json={"full_name": name})
-                            profile = sb_get_profile(token, uid)
-                            st.session_state.profile = profile
-                            st.rerun()
-                        else:
-                            st.markdown('<div class="auth-success">Account created! Please sign in.</div>', unsafe_allow_html=True)
-                            st.session_state.auth_view = "login"
-                            st.rerun()
-                    else:
-                        err = res.get("msg", res.get("error_description", res.get("error", "Registration failed. Email may already be registered.")))
-                        st.markdown(f'<div class="auth-error">⚠️ {err}</div>', unsafe_allow_html=True)
-            else:
-                st.markdown('<div class="auth-error">⚠️ Please fill all fields</div>', unsafe_allow_html=True)
-        if st.button("← Back to sign in", use_container_width=True):
-            st.session_state.auth_view = "login"
+                    st.markdown(f'<div class="auth-error">⚠️ Failed. Link may have expired. Request a new one.</div>', unsafe_allow_html=True)
+        if st.button("Back to sign in", use_container_width=True, key="back_btn"):
+            st.query_params.clear()
             st.rerun()
 
-    elif view == "forgot":
-        st.markdown('<div class="auth-title">Reset password</div>', unsafe_allow_html=True)
-        st.markdown('<div class="auth-sub">Enter your email and we will send a reset link</div>', unsafe_allow_html=True)
-        email = st.text_input("Email", placeholder="you@email.com", key="forgot_email")
-        if st.button("Send reset link →", type="primary", use_container_width=True):
-            if email:
-                ok = sb_forgot_password(email)
-                if ok:
-                    st.markdown('<div class="auth-success">✓ Reset link sent! Check your email.</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div class="auth-error">⚠️ Could not send reset email</div>', unsafe_allow_html=True)
-        if st.button("← Back to sign in", use_container_width=True):
-            st.session_state.auth_view = "login"
-            st.rerun()
-
-    st.markdown('</div></div>', unsafe_allow_html=True)
+# Handle password reset from email
+if st.query_params.get("reset_token", ""):
+    show_reset_password_page()
+    st.stop()
 
 # Show auth page if not logged in
 if not st.session_state.user:
@@ -811,7 +925,7 @@ if not st.session_state.user:
 
 # ── Refresh profile ──
 profile = st.session_state.profile or {}
-user_email = st.session_state.user.get("email", "")
+user_email = st.session_state.user.get("email", "") if st.session_state.user else ""
 user_is_pro = is_pro(profile)
 scans_left = free_scans_left(profile) if not user_is_pro else 999
 
@@ -905,25 +1019,27 @@ st.markdown(f"""
 # ── USER TOP BAR ──
 plan_color = "#22c55e" if user_is_pro else "#F59E0B"
 plan_label = "PRO" if user_is_pro else "FREE"
-scans_info = "" if user_is_pro else f" &nbsp;|&nbsp; {scans_left} free scans left"
+scans_info = "" if user_is_pro else f"{scans_left} free scans left"
 
-col_u1, col_u2, col_u3 = st.columns([4, 1, 1])
-with col_u1:
-    st.markdown(
-        f'<div style="font-size:12px;color:#666;padding:6px 0">'
-        f'<b style="color:#fff">{user_email}</b>'
-        f'&nbsp;&nbsp;'
-        f'<span style="background:{plan_color}22;color:{plan_color};border:1px solid {plan_color}44;'
-        f'font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">{plan_label}</span>'
-        f'<span style="color:#555">{scans_info}</span>'
-        f'</div>',
-        unsafe_allow_html=True
-    )
-with col_u2:
+st.markdown(f"""
+<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;margin-bottom:8px;border-bottom:1px solid #2a2a2a">
+  <div style="font-size:12px;color:#888">
+    <b style="color:#fff">{user_email}</b>
+    &nbsp;
+    <span style="background:{plan_color}22;color:{plan_color};border:1px solid {plan_color}44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">{plan_label}</span>
+    {f'&nbsp;<span style="color:#666;font-size:11px">{scans_info}</span>' if not user_is_pro else ''}
+  </div>
+  <div id="user-actions"></div>
+</div>
+""", unsafe_allow_html=True)
+
+# Action buttons top right
+btn_col1, btn_col2, btn_col3 = st.columns([6, 1, 1])
+with btn_col2:
     if st.button("Support", use_container_width=True, key="btn_support"):
         st.session_state.show_support = not st.session_state.show_support
         st.rerun()
-with col_u3:
+with btn_col3:
     if st.button("Sign out", use_container_width=True, key="btn_logout"):
         logout()
 
@@ -972,7 +1088,7 @@ if tab_choice == "✨  Rewrite with AI" and not has_score:
 </div>
 """, unsafe_allow_html=True)
 
-# ── JS: injected via st.markdown so it runs in main page (not iframe) ──
+# ── JS: injected in main CSS block ──
 st.markdown("""
 <script>
 function fixUploadButton() {
@@ -1030,9 +1146,19 @@ def validate():
 if tab_choice == "📊  Score my resume":
     c1, c2 = st.columns([5,1], gap="small")
     with c1:
-        analyze_clicked = st.button("Analyze now →", type="primary",
-            use_container_width=True, key="btn_analyze",
-            disabled=st.session_state.processing)
+        if not user_is_pro and scans_left <= 0:
+            st.markdown("""
+<div style="background:#2a1010;border:1px solid #5a2020;border-radius:10px;padding:16px 20px;margin-bottom:12px;text-align:center">
+  <div style="color:#f87171;font-weight:700;font-size:14px;margin-bottom:6px">You have used all 3 free scans this month</div>
+  <div style="color:#888;font-size:12px;margin-bottom:12px">Upgrade to Pro for unlimited scans, AI rewrite and downloads</div>
+</div>
+""", unsafe_allow_html=True)
+            st.link_button("Upgrade to Pro — Rs.199/month", "YOUR_RAZORPAY_LINK", use_container_width=True)
+            analyze_clicked = False
+        else:
+            analyze_clicked = st.button("Analyze now", type="primary",
+                use_container_width=True, key="btn_analyze",
+                disabled=st.session_state.processing)
     with c2:
         if st.button("Clear", type="secondary", use_container_width=True, key="btn_clear"):
             st.session_state.analysis_result = None
@@ -1062,7 +1188,11 @@ if tab_choice == "📊  Score my resume":
                         st.session_state.last_analyzed_jd = jd_text.strip()
                         # Increment scan count for free users
                         if not user_is_pro:
-                            sb_increment_scan(st.session_state.access_token, st.session_state.user["id"], profile.get("scans_used", 0))
+                            current_used = st.session_state.profile.get("scans_used", 0) if st.session_state.profile else 0
+                            sb_increment_scan(st.session_state.access_token, st.session_state.user["id"], current_used)
+                            # Update local profile so counter reflects immediately
+                            if st.session_state.profile:
+                                st.session_state.profile["scans_used"] = current_used + 1
                     except Exception as e:
                         st.error(f"⚠️ Error: {str(e)[:200]}")
                     finally:
