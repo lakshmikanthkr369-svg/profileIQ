@@ -1211,7 +1211,7 @@ if tab_choice == "📊  Score my resume":
   <div style="color:#888;font-size:12px;margin-bottom:12px">Upgrade to Pro for unlimited scans, AI rewrite and downloads</div>
 </div>
 """, unsafe_allow_html=True)
-            st.link_button("Upgrade to Pro — Rs.199/month", "YOUR_RAZORPAY_LINK", use_container_width=True)
+            st.link_button("Upgrade to Pro — Rs.199/month", f"https://rzp.io/rzp/FmC2uaMo?prefill[email]={user_email}&prefill[contact]=", use_container_width=True)
             analyze_clicked = False
         else:
             analyze_clicked = st.button("Analyze now", type="primary",
@@ -1310,7 +1310,7 @@ elif tab_choice == "✨  Rewrite with AI" and has_score:
   </div>
 </div>
 """, unsafe_allow_html=True)
-        st.link_button("Upgrade to Pro → Rs.199/month", "YOUR_RAZORPAY_LINK", use_container_width=True)
+        st.link_button("Upgrade to Pro — Rs.199/month", f"https://rzp.io/rzp/FmC2uaMo?prefill[email]={user_email}&prefill[contact]=", use_container_width=True)
         st.stop()
 
     c3, c4 = st.columns([5,1], gap="small")
