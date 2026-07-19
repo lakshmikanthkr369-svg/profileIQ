@@ -1115,15 +1115,6 @@ with col1:
         accept_multiple_files=False,
         label_visibility="collapsed"
     )
-    # Hide the "add" label that appears after upload
-    st.markdown("""
-<style>
-[data-testid="stFileUploaderDropzone"] + div { display: none !important; }
-[data-testid="stFileUploader"] small { display: none !important; }
-/* Also hide "add" text from file uploader */
-.stFileUploader span:not([data-testid]) { display: none !important; }
-</style>
-""", unsafe_allow_html=True)
 
 with col2:
     st.markdown("<p style='color:#fff;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px'>💼 Job Description</p>", unsafe_allow_html=True)
