@@ -32,7 +32,13 @@ try:
 except:
     SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkeWJ0YXlpcnhvY2xqd2t5ZHlnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NDEzMTM4MCwiZXhwIjoyMDk5NzA3MzgwfQ.sW_EkD71c8jJP1XM35PH5MYAkK8S0ThJlgQwe94hA_E")
 
-st.set_page_config(page_title="ProfileIQ — AI Resume Intelligence", page_icon="🎯", layout="wide")
+st.set_page_config(page_title="ProfileIQ — AI Resume Intelligence", page_icon="🟧", layout="wide")
+
+# Inject custom favicon
+st.markdown(f"""
+<link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAEAElEQVR4nO1bW0gUUQA99zqru46WJlHpZlgYEb0p6SdJrAgK7KvoI3pAReVHfQQRFBHRTxT9JBSUfRREfYhlfRSBVBQW9rCInq49pEKt1WadXXd2po8wd5xpZrcuc/cx529m7+ycc+65b4YgCYTOiVoy5XlB3BIiiZa1LZguov8GOzOo1Y/pLh6w12DqTiYIN4NZGgwJyFTxgLk2alcg0zBao2UfkA34Y0A21P4w4rXS0TeyBcOa3SbAmwBvkGyMfzyyPgGuAbwJ8IZrAG8CvOEawJsAb7gG8CbAG1lvgMDqj/Y3+XClPVd37+zGEKorFcvnAr0U15978DAgoKuPIjhIoGoERfkq/MUaFk5RsHJWFLNKY6yo6sDMgGTRLxMcuubDjeceqCarkW8DFN8GgPYPOTh9Jw9LKhUcqZNRWqQy5cGlCXT1UdQ1FKClw1y8Ge6+FVDXUICnn3KYcnE8AVKEYPsFEd0/9N7P8cewuzaMeZNjyKHAi+4cnGrNw/33IxSDgwQ7L4po2ilhwhg2SXA8AQ2teejs0b+2qkLBpa0SllQqKPRqyM/VUFWhoHFTCCtmRnVleySCYze9zPg4aoAUIbjQpu8oKQGOrpHhMUk2JcDhOhm+XH07aenwoDvIhrqjBrQFBMhD+rOJqgoFU0r+HucSUUPtDP1IElOBe+/YtF5HDWj/YKzmBeX2w9v8cuNQ+vgjm87QUQP6JONJXFkCw5q/yDhU9Elp2AR+ho0GeD3246BZmX454RNwSzhqQIHXKCQctRdiViYR4xKBowaUFBhJf+m3p/A5aDRg0tg0nAfMn2zs8J59tu/Mnnw09vizy9isDRw1YPFUxRDdB52CZQq+hwhuv9IbQAmwfKb1IitROGrAGK+G9YuGdPeUGHCw2YeYSaJVDTjQ7DPMHVbPiWJiuk6Fd9VEUD5OT771jYCNjSIedAoIRQjkIYJHXQI2nxdx86VHV3acqGHfSpkZH8cXQ2N9Gs5sCGFTo4ivAyP+twUEtAWs6RR6fz87vpDdaR6X5fC08Squ1ktYNTsKmuBwvqA8hqYdEub62W6McNsQKc7XcHLdIHYvo7je4cHDLgGBXoqgTAxtfq4/hktbJRA2cx8dUvJ0uPvH7w2T+Nne3hVhbKuOMH9XSm6KlhWrOLF2UNc8jt/yovU1+8CmpAEAUF2poL4m/Oda1YA9l/MNmyn/i5Q1AADqayJYOn1kwjO8nTZgsqj6V6RkH+AkUjoBTsA1gDcB3nAN4E2AN1wDeBPgDZrMB0aZBnFLiLgJ4E2ANyiQ3Hd2mYJhzXT0jWxAvFa3CcRfZEMKRms0JCCTTTDTZik2U/YKrCrVsg/IhDTYaUhKYLokIpmK+wUtEk0YSE4haAAAAABJRU5ErkJggg==">
+<link rel="shortcut icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAEAElEQVR4nO1bW0gUUQA99zqru46WJlHpZlgYEb0p6SdJrAgK7KvoI3pAReVHfQQRFBHRTxT9JBSUfRREfYhlfRSBVBQW9rCInq49pEKt1WadXXd2po8wd5xpZrcuc/cx529m7+ycc+65b4YgCYTOiVoy5XlB3BIiiZa1LZguov8GOzOo1Y/pLh6w12DqTiYIN4NZGgwJyFTxgLk2alcg0zBao2UfkA34Y0A21P4w4rXS0TeyBcOa3SbAmwBvkGyMfzyyPgGuAbwJ8IZrAG8CvOEawJsAb7gG8CbAG1lvgMDqj/Y3+XClPVd37+zGEKorFcvnAr0U15978DAgoKuPIjhIoGoERfkq/MUaFk5RsHJWFLNKY6yo6sDMgGTRLxMcuubDjeceqCarkW8DFN8GgPYPOTh9Jw9LKhUcqZNRWqQy5cGlCXT1UdQ1FKClw1y8Ge6+FVDXUICnn3KYcnE8AVKEYPsFEd0/9N7P8cewuzaMeZNjyKHAi+4cnGrNw/33IxSDgwQ7L4po2ilhwhg2SXA8AQ2teejs0b+2qkLBpa0SllQqKPRqyM/VUFWhoHFTCCtmRnVleySCYze9zPg4aoAUIbjQpu8oKQGOrpHhMUk2JcDhOhm+XH07aenwoDvIhrqjBrQFBMhD+rOJqgoFU0r+HucSUUPtDP1IElOBe+/YtF5HDWj/YKzmBeX2w9v8cuNQ+vgjm87QUQP6JONJXFkCw5q/yDhU9Elp2AR+ho0GeD3246BZmX454RNwSzhqQIHXKCQctRdiViYR4xKBowaUFBhJf+m3p/A5aDRg0tg0nAfMn2zs8J59tu/Mnnw09vizy9isDRw1YPFUxRDdB52CZQq+hwhuv9IbQAmwfKb1IitROGrAGK+G9YuGdPeUGHCw2YeYSaJVDTjQ7DPMHVbPiWJiuk6Fd9VEUD5OT771jYCNjSIedAoIRQjkIYJHXQI2nxdx86VHV3acqGHfSpkZH8cXQ2N9Gs5sCGFTo4ivAyP+twUEtAWs6RR6fz87vpDdaR6X5fC08Squ1ktYNTsKmuBwvqA8hqYdEub62W6McNsQKc7XcHLdIHYvo7je4cHDLgGBXoqgTAxtfq4/hktbJRA2cx8dUvJ0uPvH7w2T+Nne3hVhbKuOMH9XSm6KlhWrOLF2UNc8jt/yovU1+8CmpAEAUF2poL4m/Oda1YA9l/MNmyn/i5Q1AADqayJYOn1kwjO8nTZgsqj6V6RkH+AkUjoBTsA1gDcB3nAN4E2AN1wDeBPgDZrMB0aZBnFLiLgJ4E2ANyiQ3Hd2mYJhzXT0jWxAvFa3CcRfZEMKRms0JCCTTTDTZik2U/YKrCrVsg/IhDTYaUhKYLokIpmK+wUtEk0YSE4haAAAAABJRU5ErkJggg==">
+""", unsafe_allow_html=True)
 
 # ── SESSION STATE (must be before any widget) ──
 defaults = {
@@ -178,6 +184,18 @@ button[aria-label="Hide password"] { display: none !important; }
 [data-testid="InputInstructions"] { display: none !important; }
 /* Fix button text wrapping */
 .stButton > button { white-space: nowrap !important; }
+/* Amber outline buttons for support/signout - target by key */
+button[data-testid="btn_support"],
+button[data-testid="btn_logout"] {
+    background: transparent !important;
+    border: 1.5px solid #F59E0B !important;
+    color: #F59E0B !important;
+    font-weight: 700 !important;
+}
+button[data-testid="btn_support"]:hover,
+button[data-testid="btn_logout"]:hover {
+    background: rgba(245,158,11,0.1) !important;
+}
 
 /* ── HERO ── */
 .hero { display: grid; grid-template-columns: 1.1fr 1fr; border-radius: 16px; overflow: hidden; margin-bottom: 20px; min-height: 250px; }
@@ -872,6 +890,23 @@ header[data-testid="stHeader"] { display: none !important; }
 
 
 def show_reset_password_page():
+    st.markdown("""
+<style>
+.stApp { background: #0e0e0e !important; }
+#MainMenu, footer, header { visibility: hidden !important; }
+button[aria-label="Show password"], button[aria-label="Hide password"] { display: none !important; }
+.auth-logo { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 20px; }
+.auth-logo-mark { background: #F59E0B; color: #1a1a1a; font-size: 14px; font-weight: 900; width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+.auth-logo-text { font-size: 28px; font-weight: 900; color: #fff; letter-spacing: -1px; }
+.auth-logo-text span { color: #F59E0B; }
+.auth-title { font-size: 22px; font-weight: 900; color: #fff; text-align: center; margin-bottom: 4px; }
+.auth-sub { font-size: 13px; color: #666; text-align: center; margin-bottom: 20px; }
+.auth-error { background: #2a1010; border: 1px solid #5a2020; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #f87171; margin-bottom: 12px; }
+.auth-success { background: #0a2a1a; border: 1px solid #1a5a30; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #4ade80; margin-bottom: 12px; }
+.block-container { padding-top: 2rem !important; }
+</style>
+""", unsafe_allow_html=True)
+
     token = st.query_params.get("reset_token", "")
     _, col, _ = st.columns([1, 1.5, 1])
     with col:
@@ -1022,6 +1057,18 @@ plan_label = "PRO" if user_is_pro else "FREE"
 scans_info = "" if user_is_pro else f"{scans_left} free scans left"
 
 st.markdown(f"""
+<style>
+/* Amber outline button style for support/signout */
+[data-testid="stButton"] button[kind="secondary"].amber-btn {{
+    background: transparent !important;
+    border: 1.5px solid #F59E0B !important;
+    color: #F59E0B !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    padding: 5px 14px !important;
+    border-radius: 6px !important;
+}}
+</style>
 <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;margin-bottom:8px;border-bottom:1px solid #2a2a2a">
   <div style="font-size:12px;color:#888">
     <b style="color:#fff">{user_email}</b>
@@ -1029,13 +1076,32 @@ st.markdown(f"""
     <span style="background:{plan_color}22;color:{plan_color};border:1px solid {plan_color}44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">{plan_label}</span>
     {f'&nbsp;<span style="color:#666;font-size:11px">{scans_info}</span>' if not user_is_pro else ''}
   </div>
-  <div id="user-actions"></div>
+  <div id="user-btn-placeholder"></div>
 </div>
 """, unsafe_allow_html=True)
 
-# Action buttons top right
-btn_col1, btn_col2, btn_col3 = st.columns([6, 1, 1])
+# Buttons aligned to top right using columns
+_, btn_col2, btn_col3 = st.columns([6, 0.8, 0.8])
 with btn_col2:
+    st.markdown("""
+<style>
+div[data-testid="stButton"]:has(button#support_btn) button,
+div[data-testid="stButton"]:has(button#logout_btn) button {
+    background: transparent !important;
+    border: 1.5px solid #F59E0B !important;
+    color: #F59E0B !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    border-radius: 6px !important;
+    padding: 5px 14px !important;
+    white-space: nowrap !important;
+}
+div[data-testid="stButton"]:has(button#support_btn) button:hover,
+div[data-testid="stButton"]:has(button#logout_btn) button:hover {
+    background: #F59E0B22 !important;
+}
+</style>
+""", unsafe_allow_html=True)
     if st.button("Support", use_container_width=True, key="btn_support"):
         st.session_state.show_support = not st.session_state.show_support
         st.rerun()
@@ -1058,6 +1124,15 @@ with col1:
         accept_multiple_files=False,
         label_visibility="collapsed"
     )
+    # Hide the "add" label that appears after upload
+    st.markdown("""
+<style>
+[data-testid="stFileUploaderDropzone"] + div { display: none !important; }
+[data-testid="stFileUploader"] small { display: none !important; }
+/* Also hide "add" text from file uploader */
+.stFileUploader span:not([data-testid]) { display: none !important; }
+</style>
+""", unsafe_allow_html=True)
 
 with col2:
     st.markdown("<p style='color:#fff;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px'>💼 Job Description</p>", unsafe_allow_html=True)
