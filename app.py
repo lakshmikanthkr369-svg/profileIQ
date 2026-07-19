@@ -32,6 +32,13 @@ try:
 except:
     SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkeWJ0YXlpcnhvY2xqd2t5ZHlnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NDEzMTM4MCwiZXhwIjoyMDk5NzA3MzgwfQ.sW_EkD71c8jJP1XM35PH5MYAkK8S0ThJlgQwe94hA_E")
 
+# Anon key for auth endpoints (login/register/reset)
+# Service role key bypasses RLS but auth endpoints need anon key
+try:
+    SUPABASE_ANON_KEY = st.secrets["SUPABASE_ANON_KEY"]
+except:
+    SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkeWJ0YXlpcnhvY2xqd2t5ZHlnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQxMzEzODAsImV4cCI6MjA5OTcwNzM4MH0.8ZHHN1P6x38XdXVLNatdAHDG7FOGNquL-7CwGFegNXU")
+
 st.set_page_config(page_title="ProfileIQ — AI Resume Intelligence", page_icon="🟧", layout="wide")
 
 # Inject custom favicon
@@ -64,23 +71,24 @@ for k, v in defaults.items():
 # SUPABASE AUTH HELPERS
 # ══════════════════════════════════════
 
-def sb_headers(token=None):
-    h = {"apikey": SUPABASE_KEY, "Content-Type": "application/json"}
+def sb_headers(token=None, use_anon=False):
+    key = SUPABASE_ANON_KEY if use_anon else SUPABASE_KEY
+    h = {"apikey": key, "Content-Type": "application/json"}
     if token:
         h["Authorization"] = f"Bearer {token}"
     else:
-        h["Authorization"] = f"Bearer {SUPABASE_KEY}"
+        h["Authorization"] = f"Bearer {key}"
     return h
 
 def sb_register(email, password):
     r = requests.post(f"{SUPABASE_URL}/auth/v1/signup",
-        headers=sb_headers(),
+        headers=sb_headers(use_anon=True),
         json={"email": email, "password": password})
     return r.json()
 
 def sb_login(email, password):
     r = requests.post(f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-        headers=sb_headers(),
+        headers=sb_headers(use_anon=True),
         json={"email": email, "password": password})
     return r.json()
 
@@ -89,7 +97,7 @@ def sb_forgot_password(email):
     if not email or '@' not in email or '.' not in email.split('@')[-1]:
         return 'invalid'
     r = requests.post(f"{SUPABASE_URL}/auth/v1/recover",
-        headers=sb_headers(),
+        headers=sb_headers(use_anon=True),
         json={"email": email,
               "redirect_to": "https://profileiq.co.in/app.html"})
     # Supabase returns 200 even for unknown emails (security by design)
@@ -1211,7 +1219,7 @@ if tab_choice == "📊  Score my resume":
   <div style="color:#888;font-size:12px;margin-bottom:12px">Upgrade to Pro for unlimited scans, AI rewrite and downloads.<br><span style="color:#F59E0B;font-size:11px">⚠️ Use your ProfileIQ email when paying</span></div>
 </div>
 """, unsafe_allow_html=True)
-            st.link_button("Upgrade to Pro — Rs.199/month", "https://rzp.io/rzp/TFKQxBIOLtsH7u", use_container_width=True)
+            st.link_button("Upgrade to Pro — Rs.199/month", "https://rzp.io/rzp/FmC2uaMo", use_container_width=True)
             analyze_clicked = False
         else:
             analyze_clicked = st.button("Analyze now", type="primary",
@@ -1310,7 +1318,7 @@ elif tab_choice == "✨  Rewrite with AI" and has_score:
   </div>
 </div>
 """, unsafe_allow_html=True)
-        st.link_button("Upgrade to Pro — Rs.199/month", "https://rzp.io/rzp/TFKQxBIOLtsH7u", use_container_width=True)
+        st.link_button("Upgrade to Pro — Rs.199/month", "https://rzp.io/rzp/FmC2uaMo", use_container_width=True)
         st.stop()
 
     c3, c4 = st.columns([5,1], gap="small")
