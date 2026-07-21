@@ -1,11 +1,13 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import anthropic
 import pdfplumber
 import os
 import json
 import requests
+import razorpay
 from io import BytesIO
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from docx import Document as DocxDocument
 from docx.shared import Pt, RGBColor, Inches
@@ -39,6 +41,26 @@ try:
 except:
     SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkeWJ0YXlpcnhvY2xqd2t5ZHlnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQxMzEzODAsImV4cCI6MjA5OTcwNzM4MH0.8ZHHN1P6x38XdXVLNatdAHDG7FOGNquL-7CwGFegNXU")
 
+# ── Razorpay (subscriptions) ──
+try:
+    RAZORPAY_KEY_ID = st.secrets["RAZORPAY_KEY_ID"]
+except:
+    RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
+
+try:
+    RAZORPAY_KEY_SECRET = st.secrets["RAZORPAY_KEY_SECRET"]
+except:
+    RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
+
+try:
+    RAZORPAY_PLAN_ID = st.secrets["RAZORPAY_PLAN_ID"]
+except:
+    RAZORPAY_PLAN_ID = os.getenv("RAZORPAY_PLAN_ID", "")
+
+razorpay_client = None
+if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+    razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+
 st.set_page_config(page_title="ProfileIQ — AI Resume Intelligence", page_icon="🟧", layout="wide")
 
 # Inject custom favicon
@@ -61,6 +83,8 @@ defaults = {
     "profile": None,
     "auth_view": "login",  # login | register | forgot
     "show_support": False,
+    "pending_subscription_id": None,
+    "subscription_error": None,
 }
 
 for k, v in defaults.items():
@@ -148,6 +172,152 @@ def sb_submit_support(email, ticket_type, message):
                 })
     except: pass
     return saved
+
+def create_pro_subscription(user_id, email):
+    """Creates a Razorpay subscription for this user and returns its ID.
+    notes.user_id is how the webhook later matches the payment back to
+    this Supabase profile — no manual email matching needed."""
+    if not razorpay_client or not RAZORPAY_PLAN_ID:
+        return None, "Payments are not configured yet. Please contact support."
+    try:
+        sub = razorpay_client.subscription.create({
+            "plan_id": RAZORPAY_PLAN_ID,
+            "customer_notify": 1,
+            "total_count": 120,  # effectively "until cancelled" (10 years of monthly cycles)
+            "notes": {"user_id": user_id, "email": email},
+        })
+        return sub["id"], None
+    except Exception as e:
+        return None, str(e)
+
+def reconcile_subscription(subscription_id, user_id):
+    """Fallback for when the webhook is slow, misconfigured, or hasn't
+    fired at all yet. Asks Razorpay directly for the subscription's real
+    status and, if it's already paid, updates Supabase itself. Safe to
+    call repeatedly — it's just a read + idempotent write.
+    Returns: "paid" | "pending" | "not_paid" | None (on lookup failure)."""
+    if not razorpay_client or not subscription_id:
+        return None
+    try:
+        sub = razorpay_client.subscription.fetch(subscription_id)
+    except Exception:
+        return None
+
+    status = sub.get("status")
+    if status in ("active", "charged"):
+        current_end = sub.get("current_end")
+        if current_end:
+            expires_at = (
+                datetime.fromtimestamp(current_end, tz=timezone.utc) + timedelta(hours=6)
+            ).isoformat()
+        else:
+            expires_at = (datetime.now(timezone.utc) + timedelta(days=31)).isoformat()
+        requests.patch(
+            f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{user_id}",
+            headers={**sb_headers(), "Prefer": "return=minimal"},
+            json={
+                "plan": "pro",
+                "pro_expires_at": expires_at,
+                "razorpay_subscription_id": subscription_id,
+                "razorpay_customer_id": sub.get("customer_id"),
+                "subscription_status": status,
+            },
+        )
+        return "paid"
+
+    if status in ("created", "authenticated", "pending"):
+        return "pending"
+
+    return "not_paid"  # halted / cancelled / completed / expired
+
+def render_razorpay_checkout(subscription_id, email, key_suffix=""):
+    """Embeds Razorpay Checkout and auto-opens it for the given subscription."""
+    components.html(f"""
+    <div id="rzp-status-{key_suffix}" style="font-family:Inter,sans-serif;font-size:13px;color:#888;padding:8px 0">
+      Opening secure checkout...
+    </div>
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    <script>
+    (function() {{
+        var status = document.getElementById("rzp-status-{key_suffix}");
+        var options = {{
+            "key": "{RAZORPAY_KEY_ID}",
+            "subscription_id": "{subscription_id}",
+            "name": "ProfileIQ",
+            "description": "ProfileIQ Pro — monthly subscription",
+            "prefill": {{ "email": "{email}" }},
+            "theme": {{ "color": "#F59E0B" }},
+            "handler": function (response) {{
+                status.innerHTML = "&#9989; Payment successful! It can take a few seconds to activate. Click <b>Refresh my Pro status</b> below.";
+                status.style.color = "#22c55e";
+            }},
+            "modal": {{
+                "ondismiss": function() {{
+                    status.innerHTML = "Checkout closed. Click Upgrade to Pro again if you'd like to retry.";
+                }}
+            }}
+        }};
+        var rzp = new Razorpay(options);
+        rzp.on('payment.failed', function (response) {{
+            status.innerHTML = "&#10060; Payment failed: " + response.error.description;
+            status.style.color = "#f87171";
+        }});
+        rzp.open();
+    }})();
+    </script>
+    """, height=80)
+
+def render_upgrade_cta(key_suffix):
+    """Renders the Upgrade to Pro button + checkout flow. Call once per
+    location in the page where an upgrade CTA is needed."""
+    if st.session_state.pending_subscription_id:
+        sub_id = st.session_state.pending_subscription_id
+        # Don't blindly reopen checkout — check with Razorpay first. If this
+        # subscription was already paid (e.g. webhook hasn't updated
+        # Supabase yet), reopening checkout just shows a stale "already
+        # completed" screen. Reconcile and clear it instead.
+        result = reconcile_subscription(sub_id, st.session_state.user["id"])
+        if result == "paid":
+            fresh_profile = sb_get_profile(st.session_state.access_token, st.session_state.user["id"])
+            if fresh_profile:
+                st.session_state.profile = fresh_profile
+            st.session_state.pending_subscription_id = None
+            st.success("✅ Payment confirmed — you're Pro now!")
+            st.rerun()
+        elif result == "not_paid":
+            # Subscription was cancelled/halted/expired before completing —
+            # clear it so the next click creates a fresh one.
+            st.session_state.pending_subscription_id = None
+            st.session_state.subscription_error = "That checkout session ended without payment. Please try again."
+            st.rerun()
+        else:
+            render_razorpay_checkout(sub_id, user_email, key_suffix=key_suffix)
+
+        cols = st.columns([1, 1])
+        with cols[0]:
+            if st.button("Refresh my Pro status", use_container_width=True, key=f"btn_refresh_{key_suffix}"):
+                reconcile_subscription(st.session_state.pending_subscription_id, st.session_state.user["id"])
+                fresh_profile = sb_get_profile(st.session_state.access_token, st.session_state.user["id"])
+                if fresh_profile:
+                    st.session_state.profile = fresh_profile
+                if is_pro(fresh_profile or {}):
+                    st.session_state.pending_subscription_id = None
+                st.rerun()
+        with cols[1]:
+            if st.button("Cancel checkout", use_container_width=True, key=f"btn_cancel_checkout_{key_suffix}"):
+                st.session_state.pending_subscription_id = None
+                st.rerun()
+    else:
+        if st.session_state.subscription_error:
+            st.markdown(f'<div class="warn-badge">⚠️ {st.session_state.subscription_error}</div>', unsafe_allow_html=True)
+        if st.button("Upgrade to Pro — Rs.199/month", use_container_width=True, type="primary", key=f"btn_upgrade_{key_suffix}"):
+            sub_id, err = create_pro_subscription(st.session_state.user["id"], user_email)
+            if err:
+                st.session_state.subscription_error = err
+            else:
+                st.session_state.subscription_error = None
+                st.session_state.pending_subscription_id = sub_id
+            st.rerun()
 
 def is_pro(profile):
     if not profile: return False
@@ -1207,10 +1377,10 @@ if tab_choice == "📊  Score my resume":
             st.markdown("""
 <div style="background:#2a1010;border:1px solid #5a2020;border-radius:10px;padding:16px 20px;margin-bottom:12px;text-align:center">
   <div style="color:#f87171;font-weight:700;font-size:14px;margin-bottom:6px">You have used all 3 free scans this month</div>
-  <div style="color:#888;font-size:12px;margin-bottom:12px">Upgrade to Pro for unlimited scans, AI rewrite and downloads.<br><span style="color:#F59E0B;font-size:11px">⚠️ Use your ProfileIQ email when paying</span></div>
+  <div style="color:#888;font-size:12px;margin-bottom:12px">Upgrade to Pro for unlimited scans, AI rewrite and downloads.</div>
 </div>
 """, unsafe_allow_html=True)
-            st.link_button("Upgrade to Pro — Rs.199/month", "https://rzp.io/rzp/FmC2uaMo", use_container_width=True)
+            render_upgrade_cta("scanlimit")
             analyze_clicked = False
         else:
             analyze_clicked = st.button("Analyze now", type="primary",
@@ -1309,7 +1479,7 @@ elif tab_choice == "✨  Rewrite with AI" and has_score:
   </div>
 </div>
 """, unsafe_allow_html=True)
-        st.link_button("Upgrade to Pro — Rs.199/month", "https://rzp.io/rzp/FmC2uaMo", use_container_width=True)
+        render_upgrade_cta("rewritetab")
         st.stop()
 
     c3, c4 = st.columns([5,1], gap="small")
