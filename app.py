@@ -265,7 +265,7 @@ def render_razorpay_checkout(subscription_id, email, key_suffix=""):
         rzp.open();
     }})();
     </script>
-    """, height=80)
+    """, height=650, scrolling=True)
 
 def render_upgrade_cta(key_suffix):
     """Renders the Upgrade to Pro button + checkout flow. Call once per
