@@ -247,6 +247,18 @@ def render_razorpay_checkout(subscription_id, email, key_suffix=""):
             "description": "ProfileIQ Pro — monthly subscription",
             "prefill": {{ "email": "{email}" }},
             "theme": {{ "color": "#F59E0B" }},
+            "config": {{
+                "display": {{
+                    "blocks": {{
+                        "upi": {{
+                            "name": "Pay via UPI",
+                            "instruments": [{{ "method": "upi" }}]
+                        }}
+                    }},
+                    "sequence": ["block.upi"],
+                    "preferences": {{ "show_default_blocks": false }}
+                }}
+            }},
             "handler": function (response) {{
                 status.innerHTML = "&#9989; Payment successful! It can take a few seconds to activate. Click <b>Refresh my Pro status</b> below.";
                 status.style.color = "#22c55e";
