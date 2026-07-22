@@ -966,8 +966,14 @@ header[data-testid="stHeader"] { display: none !important; }
 .free-badge { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 8px; padding: 8px 14px; font-size: 12px; color: #F59E0B; text-align: center; margin-bottom: 16px; }
 .auth-error { background: #2a1010; border: 1px solid #5a2020; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #f87171; margin-bottom: 12px; }
 .auth-success { background: #0a2a1a; border: 1px solid #1a5a30; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #4ade80; margin-bottom: 12px; }
+.auth-support-link { text-align: center; margin-top: 18px; }
+.auth-support-link a { color: #666; font-size: 12px; text-decoration: none; border-bottom: 1px dotted #444; }
+.auth-support-link a:hover { color: #F59E0B; border-color: #F59E0B; }
 </style>
 """, unsafe_allow_html=True)
+
+    if "auth_show_support" not in st.session_state:
+        st.session_state.auth_show_support = False
 
     # Use columns to constrain width - this is the ONLY reliable way in Streamlit
     _, col, _ = st.columns([1, 1.5, 1])
@@ -1077,6 +1083,37 @@ header[data-testid="stHeader"] { display: none !important; }
             if st.button("Back to sign in", use_container_width=True):
                 st.session_state.auth_view = "login"
                 st.rerun()
+
+        st.markdown('<div class="auth-support-link">', unsafe_allow_html=True)
+        if st.button("Having trouble? Contact support", key="auth_support_toggle", use_container_width=True):
+            st.session_state.auth_show_support = not st.session_state.auth_show_support
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        if st.session_state.auth_show_support:
+            st.markdown("---")
+            st.markdown("##### 💬 Contact Support")
+            support_email = st.text_input("Your email", placeholder="you@email.com", key="auth_support_email")
+            support_type = st.selectbox("Type", ["Login Issue", "Bug Report", "Feedback", "Other"], key="auth_support_type")
+            support_message = st.text_area("Describe the issue", placeholder="Tell us what's going wrong...", height=100, key="auth_support_msg")
+            sc1, sc2 = st.columns(2)
+            with sc1:
+                if st.button("Submit", type="primary", use_container_width=True, key="auth_support_submit"):
+                    if not support_email or "@" not in support_email:
+                        st.markdown('<div class="auth-error">⚠️ Please enter a valid email</div>', unsafe_allow_html=True)
+                    elif not support_message.strip():
+                        st.markdown('<div class="auth-error">⚠️ Please describe the issue</div>', unsafe_allow_html=True)
+                    else:
+                        ok = sb_submit_support(support_email, support_type, support_message)
+                        if ok:
+                            st.markdown('<div class="auth-success">✓ Submitted! We\'ll get back to you soon.</div>', unsafe_allow_html=True)
+                            st.session_state.auth_show_support = False
+                        else:
+                            st.markdown('<div class="auth-error">⚠️ Failed to submit. Please try again.</div>', unsafe_allow_html=True)
+            with sc2:
+                if st.button("Cancel", use_container_width=True, key="auth_support_cancel"):
+                    st.session_state.auth_show_support = False
+                    st.rerun()
 
 
 def show_reset_password_page():
