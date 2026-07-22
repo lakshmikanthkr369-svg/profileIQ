@@ -552,12 +552,12 @@ div[data-testid="stRadio"] [data-testid="stMarkdownContainer"] p { font-size: 11
     font-size: 12px !important; letter-spacing: 0.07em !important;
     text-transform: uppercase !important; border-radius: 8px !important;
     padding: 13px 24px !important; width: 100% !important; transition: opacity 0.15s !important;
+    background: #F59E0B !important; color: #1a1a1a !important; border: none !important;
 }
-.stButton > button[kind="primary"] { background: #F59E0B !important; color: #1a1a1a !important; border: none !important; }
-.stButton > button[kind="primary"]:hover { opacity: 0.88 !important; }
-.stButton > button[kind="primary"]:disabled { background: #7a5200 !important; color: #333 !important; opacity: 0.5 !important; }
-.stButton > button[kind="secondary"] { background: #222 !important; color: #666 !important; border: 1px solid #333 !important; }
-.stButton > button[kind="secondary"]:hover { border-color: #555 !important; color: #ccc !important; }
+.stButton > button:hover { opacity: 0.88 !important; }
+.stButton > button:disabled { background: #7a5200 !important; color: #333 !important; opacity: 0.5 !important; }
+.stButton > button[kind="secondary"] { background: #F59E0B !important; color: #1a1a1a !important; border: none !important; }
+.stButton > button[kind="secondary"]:hover { opacity: 0.88 !important; }
 
 /* ── DOWNLOAD BUTTONS ── */
 .stDownloadButton > button {

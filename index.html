@@ -50,6 +50,12 @@ nav {
   text-decoration: none; transition: opacity 0.15s;
 }
 .nav-cta:hover { opacity: 0.88; }
+.nav-login {
+  color: var(--white); border: 1px solid var(--border);
+  padding: 9px 20px; border-radius: 8px; font-size: 13px; font-weight: 700;
+  text-decoration: none; transition: all 0.15s; margin-right: 10px;
+}
+.nav-login:hover { border-color: var(--amber); color: var(--amber); }
 
 /* ── HERO ── */
 .hero {
@@ -283,7 +289,10 @@ footer {
     <div class="logo-mark">IQ</div>
     <div class="logo-name">Profile<span>IQ</span></div>
   </a>
-  <a href="/app.html" target="_blank" class="nav-cta">Try for free →</a>
+  <div style="display:flex;align-items:center">
+    <a href="/app.html" target="_blank" class="nav-login">Login</a>
+    <a href="/app.html" target="_blank" class="nav-cta">Try for free →</a>
+  </div>
 </nav>
 
 <!-- HERO -->
