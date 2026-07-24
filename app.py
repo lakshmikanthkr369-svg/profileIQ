@@ -61,7 +61,7 @@ razorpay_client = None
 if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
     razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
-st.set_page_config(page_title="ProfileIQ — AI Resume Intelligence", page_icon="🟧", layout="wide")
+st.set_page_config(page_title="ProfileIQ — AI Resume Intelligence", page_icon="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAEAElEQVR4nO1bW0gUUQA99zqru46WJlHpZlgYEb0p6SdJrAgK7KvoI3pAReVHfQQRFBHRTxT9JBSUfRREfYhlfRSBVBQW9rCInq49pEKt1WadXXd2po8wd5xpZrcuc/cx529m7+ycc+65b4YgCYTOiVoy5XlB3BIiiZa1LZguov8GOzOo1Y/pLh6w12DqTiYIN4NZGgwJyFTxgLk2alcg0zBao2UfkA34Y0A21P4w4rXS0TeyBcOa3SbAmwBvkGyMfzyyPgGuAbwJ8IZrAG8CvOEawJsAb7gG8CbAG1lvgMDqj/Y3+XClPVd37+zGEKorFcvnAr0U15978DAgoKuPIjhIoGoERfkq/MUaFk5RsHJWFLNKY6yo6sDMgGTRLxMcuubDjeceqCarkW8DFN8GgPYPOTh9Jw9LKhUcqZNRWqQy5cGlCXT1UdQ1FKClw1y8Ge6+FVDXUICnn3KYcnE8AVKEYPsFEd0/9N7P8cewuzaMeZNjyKHAi+4cnGrNw/33IxSDgwQ7L4po2ilhwhg2SXA8AQ2teejs0b+2qkLBpa0SllQqKPRqyM/VUFWhoHFTCCtmRnVleySCYze9zPg4aoAUIbjQpu8oKQGOrpHhMUk2JcDhOhm+XH07aenwoDvIhrqjBrQFBMhD+rOJqgoFU0r+HucSUUPtDP1IElOBe+/YtF5HDWj/YKzmBeX2w9v8cuNQ+vgjm87QUQP6JONJXFkCw5q/yDhU9Elp2AR+ho0GeD3246BZmX454RNwSzhqQIHXKCQctRdiViYR4xKBowaUFBhJf+m3p/A5aDRg0tg0nAfMn2zs8J59tu/Mnnw09vizy9isDRw1YPFUxRDdB52CZQq+hwhuv9IbQAmwfKb1IitROGrAGK+G9YuGdPeUGHCw2YeYSaJVDTjQ7DPMHVbPiWJiuk6Fd9VEUD5OT771jYCNjSIedAoIRQjkIYJHXQI2nxdx86VHV3acqGHfSpkZH8cXQ2N9Gs5sCGFTo4ivAyP+twUEtAWs6RR6fz87vpDdaR6X5fC08Squ1ktYNTsKmuBwvqA8hqYdEub62W6McNsQKc7XcHLdIHYvo7je4cHDLgGBXoqgTAxtfq4/hktbJRA2cx8dUvJ0uPvH7w2T+Nne3hVhbKuOMH9XSm6KlhWrOLF2UNc8jt/yovU1+8CmpAEAUF2poL4m/Oda1YA9l/MNmyn/i5Q1AADqayJYOn1kwjO8nTZgsqj6V6RkH+AkUjoBTsA1gDcB3nAN4E2AN1wDeBPgDZrMB0aZBnFLiLgJ4E2ANyiQ3Hd2mYJhzXT0jWxAvFa3CcRfZEMKRms0JCCTTTDTZik2U/YKrCrVsg/IhDTYaUhKYLokIpmK+wUtEk0YSE4haAAAAABJRU5ErkJggg==", layout="wide")
 
 # Inject custom favicon
 st.markdown(f"""
@@ -362,12 +362,7 @@ def logout():
     st.session_state.analysis_result = None
     st.session_state.rewrite_data = None
     st.session_state.after_score = None
-    components.html("""
-    <script>
-    window.top.location.href = "https://profileiq.co.in/";
-    </script>
-    """, height=0)
-    st.stop()
+    st.rerun()
 
 
 st.markdown("""
@@ -1225,7 +1220,11 @@ st.markdown("""
     padding: 10px 4px; margin: -1rem -1rem 12px -1rem; padding-left: 1rem; padding-right: 1rem;
     background: #1a1a1a; border-bottom: 1px solid #2a2a2a;
 }
-.piq-nav-logo { display: flex; align-items: center; gap: 8px; text-decoration: none; }
+.piq-nav-logo, .piq-nav-logo:hover, .piq-nav-logo:visited {
+    display: flex; align-items: center; gap: 8px;
+    text-decoration: none !important; color: inherit !important;
+}
+.piq-logo-name { text-decoration: none !important; }
 .piq-logo-mark { width: 30px; height: 30px; background: #F59E0B; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 900; color: #1a1a1a; }
 .piq-logo-name { font-size: 16px; font-weight: 900; color: #fff; letter-spacing: -0.5px; }
 .piq-logo-name span { color: #F59E0B; }
