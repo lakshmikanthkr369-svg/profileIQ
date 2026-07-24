@@ -1367,7 +1367,7 @@ if st.session_state.show_manage_sub and user_is_pro:
     else:
         st.markdown(f'<div style="color:#888;font-size:13px;margin-bottom:12px">Next billing date: <b style="color:#fff">{expires_display}</b> · ₹199/month via UPI Autopay</div>', unsafe_allow_html=True)
         if not st.session_state.confirm_cancel_sub:
-            if st.button("Cancel subscription", key="btn_cancel_sub_start"):
+            if st.button("Cancel subscription", use_container_width=True, key="btn_cancel_sub_start"):
                 st.session_state.confirm_cancel_sub = True
                 st.rerun()
         else:
