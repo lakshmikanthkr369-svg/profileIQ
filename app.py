@@ -162,7 +162,7 @@ def sb_submit_support(email, ticket_type, message):
     try:
         RESEND_KEY = st.secrets.get("RESEND_API_KEY", os.getenv("RESEND_API_KEY", ""))
         if RESEND_KEY:
-            requests.post("https://api.resend.com/emails",
+            resp = requests.post("https://api.resend.com/emails",
                 headers={"Authorization": f"Bearer {RESEND_KEY}", "Content-Type": "application/json"},
                 json={
                     "from": "ProfileIQ <noreply@profileiq.co.in>",
@@ -170,7 +170,12 @@ def sb_submit_support(email, ticket_type, message):
                     "subject": f"[ProfileIQ Support] {ticket_type} from {email}",
                     "html": f"<p><b>From:</b> {email}</p><p><b>Type:</b> {ticket_type}</p><p><b>Message:</b><br>{message}</p>"
                 })
-    except: pass
+            if resp.status_code not in (200, 201):
+                print(f"[support email] Resend API error {resp.status_code}: {resp.text}")
+        else:
+            print("[support email] RESEND_API_KEY is not set — skipped sending notification email")
+    except Exception as e:
+        print(f"[support email] Exception while sending: {e}")
     return saved
 
 def create_pro_subscription(user_id, email):
