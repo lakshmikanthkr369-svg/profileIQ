@@ -288,7 +288,8 @@ def render_upgrade_cta(key_suffix):
         # subscription was already paid (e.g. webhook hasn't updated
         # Supabase yet), reopening checkout just shows a stale "already
         # completed" screen. Reconcile and clear it instead.
-        result = reconcile_subscription(sub_id, st.session_state.user["id"])
+        with st.spinner("Checking payment status..."):
+            result = reconcile_subscription(sub_id, st.session_state.user["id"])
         if result == "paid":
             fresh_profile = sb_get_profile(st.session_state.access_token, st.session_state.user["id"])
             if fresh_profile:
@@ -308,8 +309,9 @@ def render_upgrade_cta(key_suffix):
         cols = st.columns([1, 1])
         with cols[0]:
             if st.button("Refresh my Pro status", use_container_width=True, key=f"btn_refresh_{key_suffix}"):
-                reconcile_subscription(st.session_state.pending_subscription_id, st.session_state.user["id"])
-                fresh_profile = sb_get_profile(st.session_state.access_token, st.session_state.user["id"])
+                with st.spinner("Refreshing your status..."):
+                    reconcile_subscription(st.session_state.pending_subscription_id, st.session_state.user["id"])
+                    fresh_profile = sb_get_profile(st.session_state.access_token, st.session_state.user["id"])
                 if fresh_profile:
                     st.session_state.profile = fresh_profile
                 if is_pro(fresh_profile or {}):
@@ -323,7 +325,8 @@ def render_upgrade_cta(key_suffix):
         if st.session_state.subscription_error:
             st.markdown(f'<div class="warn-badge">⚠️ {st.session_state.subscription_error}</div>', unsafe_allow_html=True)
         if st.button("Upgrade to Pro — Rs.199/month", use_container_width=True, type="primary", key=f"btn_upgrade_{key_suffix}"):
-            sub_id, err = create_pro_subscription(st.session_state.user["id"], user_email)
+            with st.spinner("Setting up secure checkout..."):
+                sub_id, err = create_pro_subscription(st.session_state.user["id"], user_email)
             if err:
                 st.session_state.subscription_error = err
             else:
@@ -351,7 +354,12 @@ def logout():
     st.session_state.analysis_result = None
     st.session_state.rewrite_data = None
     st.session_state.after_score = None
-    st.rerun()
+    components.html("""
+    <script>
+    window.top.location.href = "https://profileiq.co.in/";
+    </script>
+    """, height=0)
+    st.stop()
 
 
 st.markdown("""
@@ -485,6 +493,28 @@ button[data-testid="btn_logout"]:hover {
     color: #888 !important;
     width: auto !important;
     padding: 4px !important;
+}
+/* Catch-all: Material icon ligature text (e.g. "add", "close", "delete") can
+   render as literal words if the icon font hasn't loaded yet or a new
+   Streamlit release adds an icon we haven't manually targeted. Zeroing the
+   font-size everywhere is a safe default since every icon spot in this app
+   already has its own custom label/graphic. */
+[data-testid="stIconMaterial"] { font-size: 0 !important; line-height: 0 !important; }
+
+/* Fix 4: the dropzone was stretching to match the Job Description column's
+   height (flex align-items: stretch), so empty space below the button was
+   still part of the clickable upload target. Constrain it to its own
+   content height so clicks outside the visible button/instructions don't
+   trigger the file picker. */
+[data-testid="stFileUploader"] {
+    align-self: flex-start !important;
+    height: auto !important;
+    flex: 0 0 auto !important;
+}
+[data-testid="stFileUploaderDropzone"] {
+    align-self: flex-start !important;
+    height: auto !important;
+    flex-grow: 0 !important;
 }
 
 /* ── TEXTAREA — remove resize handle ── */
@@ -996,12 +1026,13 @@ header[data-testid="stHeader"] { display: none !important; }
                 if email and password:
                     with st.spinner("Signing in..."):
                         res = sb_login(email, password)
+                        if "access_token" in res:
+                            st.session_state.access_token = res["access_token"]
+                            st.session_state.user = res["user"]
+                            profile = sb_get_profile(res["access_token"], res["user"]["id"])
+                            profile = sb_reset_scans_if_needed(res["access_token"], res["user"]["id"], profile or {})
+                            st.session_state.profile = profile
                     if "access_token" in res:
-                        st.session_state.access_token = res["access_token"]
-                        st.session_state.user = res["user"]
-                        profile = sb_get_profile(res["access_token"], res["user"]["id"])
-                        profile = sb_reset_scans_if_needed(res["access_token"], res["user"]["id"], profile or {})
-                        st.session_state.profile = profile
                         st.rerun()
                     else:
                         err = res.get("error_description", res.get("msg", "Invalid email or password"))
@@ -1073,7 +1104,8 @@ header[data-testid="stHeader"] { display: none !important; }
                 elif '@' not in email or '.' not in email.split('@')[-1]:
                     st.markdown('<div class="auth-error">⚠️ Please enter a valid email address</div>', unsafe_allow_html=True)
                 else:
-                    result = sb_forgot_password(email)
+                    with st.spinner("Sending reset link..."):
+                        result = sb_forgot_password(email)
                     if result == 'invalid':
                         st.markdown('<div class="auth-error">⚠️ Please enter a valid email address</div>', unsafe_allow_html=True)
                     elif result == 'sent':
@@ -1104,7 +1136,8 @@ header[data-testid="stHeader"] { display: none !important; }
                     elif not support_message.strip():
                         st.markdown('<div class="auth-error">⚠️ Please describe the issue</div>', unsafe_allow_html=True)
                     else:
-                        ok = sb_submit_support(support_email, support_type, support_message)
+                        with st.spinner("Submitting..."):
+                            ok = sb_submit_support(support_email, support_type, support_message)
                         if ok:
                             st.markdown('<div class="auth-success">✓ Submitted! We\'ll get back to you soon.</div>', unsafe_allow_html=True)
                             st.session_state.auth_show_support = False
@@ -1161,9 +1194,10 @@ button[aria-label="Show password"], button[aria-label="Hide password"] { display
             elif new_pass != confirm_pass:
                 st.markdown('<div class="auth-error">⚠️ Passwords do not match</div>', unsafe_allow_html=True)
             else:
-                r = requests.put(f"{SUPABASE_URL}/auth/v1/user",
-                    headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                    json={"password": new_pass})
+                with st.spinner("Updating password..."):
+                    r = requests.put(f"{SUPABASE_URL}/auth/v1/user",
+                        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                        json={"password": new_pass})
                 if r.status_code == 200:
                     st.markdown('<div class="auth-success">✓ Password updated! Please sign in.</div>', unsafe_allow_html=True)
                     import time; time.sleep(2)
@@ -1201,7 +1235,8 @@ def show_support_form():
     with c1:
         if st.button("Submit", type="primary", use_container_width=True):
             if message.strip():
-                ok = sb_submit_support(user_email, ticket_type, message)
+                with st.spinner("Submitting..."):
+                    ok = sb_submit_support(user_email, ticket_type, message)
                 if ok:
                     st.success("✓ Submitted! We'll get back to you at " + user_email)
                     st.session_state.show_support = False
@@ -1213,6 +1248,52 @@ def show_support_form():
         if st.button("Cancel", use_container_width=True):
             st.session_state.show_support = False
             st.rerun()
+
+# ── USER TOP BAR ── (above the hero panel, top of page)
+plan_color = "#22c55e" if user_is_pro else "#F59E0B"
+plan_label = "PRO" if user_is_pro else "FREE"
+scans_info = "" if user_is_pro else f"{scans_left} free scans left"
+
+st.markdown(f"""
+<style>
+/* Amber outline for support/signout */
+div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button {{
+    background: transparent !important;
+    border: 1.5px solid #F59E0B !important;
+    color: #F59E0B !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    padding: 6px 16px !important;
+    border-radius: 6px !important;
+}}
+</style>
+<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;margin-bottom:12px;border-bottom:1px solid #2a2a2a">
+  <div style="font-size:12px;color:#888">
+    <b style="color:#fff">{user_email}</b>
+    &nbsp;
+    <span style="background:{plan_color}22;color:{plan_color};border:1px solid {plan_color}44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">{plan_label}</span>
+    {f'&nbsp;<span style="color:#666;font-size:11px">{scans_info}</span>' if not user_is_pro else ''}
+  </div>
+  <div style="display:flex;gap:8px">
+    <div id="support-btn-placeholder"></div>
+    <div id="signout-btn-placeholder"></div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+user_col1, user_col2, user_col3 = st.columns([7, 1, 1])
+with user_col2:
+    if st.button("Support", use_container_width=True, key="btn_support"):
+        st.session_state.show_support = not st.session_state.show_support
+        st.rerun()
+with user_col3:
+    if st.button("Sign out", use_container_width=True, key="btn_logout"):
+        logout()
+
+if st.session_state.show_support:
+    show_support_form()
+
+st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
 # ── BUILD DYNAMIC HERO PANEL ──
 before_score = st.session_state.analysis_result["score"] if st.session_state.analysis_result else None
@@ -1278,52 +1359,6 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# ── USER TOP BAR ──
-plan_color = "#22c55e" if user_is_pro else "#F59E0B"
-plan_label = "PRO" if user_is_pro else "FREE"
-scans_info = "" if user_is_pro else f"{scans_left} free scans left"
-
-st.markdown(f"""
-<style>
-/* Amber outline for support/signout */
-div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button {{
-    background: transparent !important;
-    border: 1.5px solid #F59E0B !important;
-    color: #F59E0B !important;
-    font-size: 11px !important;
-    font-weight: 700 !important;
-    padding: 6px 16px !important;
-    border-radius: 6px !important;
-}}
-</style>
-<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;margin-bottom:12px;border-bottom:1px solid #2a2a2a">
-  <div style="font-size:12px;color:#888">
-    <b style="color:#fff">{user_email}</b>
-    &nbsp;
-    <span style="background:{plan_color}22;color:{plan_color};border:1px solid {plan_color}44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">{plan_label}</span>
-    {f'&nbsp;<span style="color:#666;font-size:11px">{scans_info}</span>' if not user_is_pro else ''}
-  </div>
-  <div style="display:flex;gap:8px">
-    <div id="support-btn-placeholder"></div>
-    <div id="signout-btn-placeholder"></div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-
-user_col1, user_col2, user_col3 = st.columns([7, 1, 1])
-with user_col2:
-    if st.button("Support", use_container_width=True, key="btn_support"):
-        st.session_state.show_support = not st.session_state.show_support
-        st.rerun()
-with user_col3:
-    if st.button("Sign out", use_container_width=True, key="btn_logout"):
-        logout()
-
-if st.session_state.show_support:
-    show_support_form()
-
-st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-
 # ── INPUTS ──
 col1, col2 = st.columns(2, gap="medium")
 with col1:
@@ -1334,6 +1369,23 @@ with col1:
         accept_multiple_files=False,
         label_visibility="collapsed"
     )
+
+    # If the uploaded file no longer matches what was actually analyzed
+    # (user swapped in a different resume), the old score/rewrite results
+    # are for a resume that's no longer selected — clear them so the Hero
+    # panel doesn't show stale after-AI data, and so Rewrite is blocked
+    # until the new file is re-analyzed.
+    _current_file_id = get_file_id(resume_file)
+    if st.session_state.analysis_result is not None and _current_file_id != st.session_state.last_analyzed_file:
+        st.session_state.analysis_result = None
+        st.session_state.rewrite_data = None
+        st.session_state.after_score = None
+        st.session_state.after_matched = []
+        st.session_state.after_missing = []
+        st.session_state.last_analyzed_file = None
+        st.session_state.last_analyzed_jd = None
+        st.toast("⚠️ New resume detected — please re-analyze before rewriting.", icon="⚠️")
+        st.rerun()
 
 with col2:
     st.markdown("<p style='color:#fff;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px'>💼 Job Description</p>", unsafe_allow_html=True)
