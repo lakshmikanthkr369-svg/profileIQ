@@ -406,18 +406,6 @@ button[aria-label="Hide password"] { display: none !important; }
 [data-testid="InputInstructions"] { display: none !important; }
 /* Fix button text wrapping */
 .stButton > button { white-space: nowrap !important; }
-/* Amber outline buttons for support/signout - target by key */
-button[data-testid="btn_support"],
-button[data-testid="btn_logout"] {
-    background: transparent !important;
-    border: 1.5px solid #F59E0B !important;
-    color: #F59E0B !important;
-    font-weight: 700 !important;
-}
-button[data-testid="btn_support"]:hover,
-button[data-testid="btn_logout"]:hover {
-    background: rgba(245,158,11,0.1) !important;
-}
 
 /* ── HERO ── */
 .hero { display: grid; grid-template-columns: 1.1fr 1fr; border-radius: 16px; overflow: hidden; margin-bottom: 20px; min-height: 250px; }
@@ -1306,28 +1294,12 @@ plan_label = "PRO" if user_is_pro else "FREE"
 scans_info = "" if user_is_pro else f"{scans_left} free scans left"
 
 st.markdown(f"""
-<style>
-/* Amber outline for support/signout */
-div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button {{
-    background: transparent !important;
-    border: 1.5px solid #F59E0B !important;
-    color: #F59E0B !important;
-    font-size: 11px !important;
-    font-weight: 700 !important;
-    padding: 6px 16px !important;
-    border-radius: 6px !important;
-}}
-</style>
 <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;margin-bottom:12px;border-bottom:1px solid #2a2a2a">
   <div style="font-size:12px;color:#888">
     <b style="color:#fff">{user_email}</b>
     &nbsp;
     <span style="background:{plan_color}22;color:{plan_color};border:1px solid {plan_color}44;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px">{plan_label}</span>
     {f'&nbsp;<span style="color:#666;font-size:11px">{scans_info}</span>' if not user_is_pro else ''}
-  </div>
-  <div style="display:flex;gap:8px">
-    <div id="support-btn-placeholder"></div>
-    <div id="signout-btn-placeholder"></div>
   </div>
 </div>
 """, unsafe_allow_html=True)
