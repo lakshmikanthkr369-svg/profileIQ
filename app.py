@@ -595,6 +595,11 @@ div[data-testid="stRadio"] [data-testid="stMarkdownContainer"] p { font-size: 11
     text-transform: uppercase !important; border-radius: 8px !important;
     padding: 13px 24px !important; width: 100% !important; transition: opacity 0.15s !important;
     background: #F59E0B !important; color: #1a1a1a !important; border: none !important;
+    text-align: center !important; display: flex !important;
+    align-items: center !important; justify-content: center !important;
+}
+.stButton > button p, .stButton > button div, .stButton > button span {
+    text-align: center !important; width: auto !important;
 }
 .stButton > button:hover { opacity: 0.88 !important; }
 .stButton > button:disabled { background: #7a5200 !important; color: #333 !important; opacity: 0.5 !important; }
