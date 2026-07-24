@@ -160,7 +160,10 @@ def sb_submit_support(email, ticket_type, message):
     
     # Send email notification via Resend
     try:
-        RESEND_KEY = st.secrets.get("RESEND_API_KEY", os.getenv("RESEND_API_KEY", ""))
+        try:
+            RESEND_KEY = st.secrets["RESEND_API_KEY"]
+        except Exception:
+            RESEND_KEY = os.getenv("RESEND_API_KEY", "")
         if RESEND_KEY:
             resp = requests.post("https://api.resend.com/emails",
                 headers={"Authorization": f"Bearer {RESEND_KEY}", "Content-Type": "application/json"},
