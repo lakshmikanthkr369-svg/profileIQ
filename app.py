@@ -85,6 +85,8 @@ defaults = {
     "show_support": False,
     "pending_subscription_id": None,
     "subscription_error": None,
+    "show_manage_sub": False,
+    "confirm_cancel_sub": False,
 }
 
 for k, v in defaults.items():
@@ -341,6 +343,25 @@ def render_upgrade_cta(key_suffix):
                 st.session_state.subscription_error = None
                 st.session_state.pending_subscription_id = sub_id
             st.rerun()
+
+def cancel_subscription(subscription_id, user_id):
+    """Cancels at the end of the current billing cycle — the user keeps
+    Pro access until pro_expires_at, matching the refund policy (no
+    immediate loss of access on cancellation)."""
+    if not razorpay_client or not subscription_id:
+        return False, "Payments are not configured."
+    try:
+        razorpay_client.subscription.cancel(subscription_id, {"cancel_at_cycle_end": True})
+    except Exception as e:
+        return False, str(e)
+    # Reflect this immediately in Supabase rather than waiting for the
+    # webhook, so the UI can show "cancels on <date>" right away.
+    requests.patch(
+        f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{user_id}",
+        headers={**sb_headers(), "Prefer": "return=minimal"},
+        json={"subscription_status": "cancel_at_cycle_end"},
+    )
+    return True, None
 
 def is_pro(profile):
     if not profile: return False
@@ -1231,7 +1252,7 @@ st.markdown("""
 .piq-nav-badge { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); color: #F59E0B; font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 20px; }
 </style>
 <div class="piq-nav">
-  <a href="https://profileiq.co.in/" class="piq-nav-logo" target="_blank" rel="noopener">
+  <a href="https://profileiq.co.in/" class="piq-nav-logo" target="_blank" rel="noopener" style="text-decoration:none !important;color:inherit !important;display:flex;align-items:center;gap:8px;">
     <div class="piq-logo-mark">IQ</div>
     <div class="piq-logo-name">Profile<span>IQ</span></div>
   </a>
@@ -1311,14 +1332,65 @@ div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] button {{
 </div>
 """, unsafe_allow_html=True)
 
-user_col1, user_col2, user_col3 = st.columns([7, 1, 1])
-with user_col2:
-    if st.button("Support", use_container_width=True, key="btn_support"):
-        st.session_state.show_support = not st.session_state.show_support
-        st.rerun()
-with user_col3:
-    if st.button("Sign out", use_container_width=True, key="btn_logout"):
-        logout()
+if user_is_pro:
+    user_col1, user_col2, user_col3, user_col4 = st.columns([6, 1.2, 1, 1])
+    with user_col2:
+        if st.button("Manage plan", use_container_width=True, key="btn_manage_sub"):
+            st.session_state.show_manage_sub = not st.session_state.show_manage_sub
+            st.session_state.confirm_cancel_sub = False
+            st.rerun()
+    with user_col3:
+        if st.button("Support", use_container_width=True, key="btn_support"):
+            st.session_state.show_support = not st.session_state.show_support
+            st.rerun()
+    with user_col4:
+        if st.button("Sign out", use_container_width=True, key="btn_logout"):
+            logout()
+else:
+    user_col1, user_col2, user_col3 = st.columns([7, 1, 1])
+    with user_col2:
+        if st.button("Support", use_container_width=True, key="btn_support"):
+            st.session_state.show_support = not st.session_state.show_support
+            st.rerun()
+    with user_col3:
+        if st.button("Sign out", use_container_width=True, key="btn_logout"):
+            logout()
+
+if st.session_state.show_manage_sub and user_is_pro:
+    st.markdown("---")
+    st.markdown("##### 📋 Manage Subscription")
+    sub_status = profile.get("subscription_status", "active")
+    expires_raw = profile.get("pro_expires_at")
+    expires_display = expires_raw[:10] if expires_raw else "—"
+    if sub_status == "cancel_at_cycle_end":
+        st.markdown(f'<div class="auth-error">Your subscription is set to cancel. You\'ll keep Pro access until <b>{expires_display}</b>, then it won\'t renew.</div>', unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div style="color:#888;font-size:13px;margin-bottom:12px">Next billing date: <b style="color:#fff">{expires_display}</b> · ₹199/month via UPI Autopay</div>', unsafe_allow_html=True)
+        if not st.session_state.confirm_cancel_sub:
+            if st.button("Cancel subscription", key="btn_cancel_sub_start"):
+                st.session_state.confirm_cancel_sub = True
+                st.rerun()
+        else:
+            st.markdown(f'<div class="auth-error">⚠️ You\'ll keep Pro access until <b>{expires_display}</b>, then it won\'t renew. This can\'t be undone from here.</div>', unsafe_allow_html=True)
+            cc1, cc2 = st.columns(2)
+            with cc1:
+                if st.button("Yes, cancel", type="primary", use_container_width=True, key="btn_cancel_sub_confirm"):
+                    with st.spinner("Cancelling..."):
+                        ok, err = cancel_subscription(profile.get("razorpay_subscription_id"), st.session_state.user["id"])
+                    if ok:
+                        fresh_profile = sb_get_profile(st.session_state.access_token, st.session_state.user["id"])
+                        if fresh_profile:
+                            st.session_state.profile = fresh_profile
+                        st.session_state.confirm_cancel_sub = False
+                        st.success("✓ Subscription cancelled — Pro access continues until your current period ends.")
+                        st.rerun()
+                    else:
+                        st.markdown(f'<div class="auth-error">⚠️ {err}</div>', unsafe_allow_html=True)
+            with cc2:
+                if st.button("Never mind", use_container_width=True, key="btn_cancel_sub_back"):
+                    st.session_state.confirm_cancel_sub = False
+                    st.rerun()
+    st.markdown("---")
 
 if st.session_state.show_support:
     show_support_form()
