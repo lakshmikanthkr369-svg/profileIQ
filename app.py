@@ -1217,6 +1217,29 @@ button[aria-label="Show password"], button[aria-label="Hide password"] { display
             st.query_params.clear()
             st.rerun()
 
+# ── TOP NAV (replaces the old app.html iframe wrapper) ──
+st.markdown("""
+<style>
+.piq-nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 4px; margin: -1rem -1rem 12px -1rem; padding-left: 1rem; padding-right: 1rem;
+    background: #1a1a1a; border-bottom: 1px solid #2a2a2a;
+}
+.piq-nav-logo { display: flex; align-items: center; gap: 8px; text-decoration: none; }
+.piq-logo-mark { width: 30px; height: 30px; background: #F59E0B; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 900; color: #1a1a1a; }
+.piq-logo-name { font-size: 16px; font-weight: 900; color: #fff; letter-spacing: -0.5px; }
+.piq-logo-name span { color: #F59E0B; }
+.piq-nav-badge { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); color: #F59E0B; font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 20px; }
+</style>
+<div class="piq-nav">
+  <a href="https://profileiq.co.in/" class="piq-nav-logo" target="_blank" rel="noopener">
+    <div class="piq-logo-mark">IQ</div>
+    <div class="piq-logo-name">Profile<span>IQ</span></div>
+  </a>
+  <span class="piq-nav-badge">AI Powered</span>
+</div>
+""", unsafe_allow_html=True)
+
 # Handle password reset from email
 if st.query_params.get("reset_token", ""):
     show_reset_password_page()
