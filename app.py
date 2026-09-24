@@ -87,6 +87,10 @@ defaults = {
     "subscription_error": None,
     "show_manage_sub": False,
     "confirm_cancel_sub": False,
+    "is_fresher_mode": False,
+    "fresher_loaded": False,
+    "fresher_projects": [{"name": "", "description": ""}],
+    "fresher_certifications": [{"name": ""}],
 }
 
 for k, v in defaults.items():
@@ -152,6 +156,12 @@ def sb_reset_scans_if_needed(token, user_id, profile):
                 json={"scans_used": 0, "scans_reset_date": str(now)})
             profile["scans_used"] = 0
     return profile
+
+def sb_save_fresher_profile(token, user_id, data):
+    r = requests.patch(f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{user_id}",
+        headers={**sb_headers(token), "Prefer": "return=minimal"},
+        json={"fresher_profile": data})
+    return r.status_code in (200, 204)
 
 def sb_submit_support(email, ticket_type, message):
     # Save to Supabase
@@ -861,6 +871,95 @@ Job Description:
     data["experience"] = cleaned_exp
     return data
 
+def build_fresher_resume(profile_data, jd):
+    """Builds a resume from scratch for a fresher (no prior resume) using
+    their education/projects/skills data, tailored to the job description.
+    Returns the SAME JSON schema as do_rewrite() so make_docx/make_pdf and
+    the preview all work unchanged. Academic projects are mapped into the
+    'experience' list but the section is labeled PROJECTS, not WORK
+    EXPERIENCE, to stay honest on the actual resume."""
+    client = anthropic.Anthropic(api_key=API_KEY)
+
+    projects_text = "\n".join(
+        f"- {p.get('name','')}: {p.get('description','')}"
+        for p in profile_data.get("projects", []) if p.get("name")
+    ) or "None provided"
+    certs_text = ", ".join(
+        c.get("name", "") for c in profile_data.get("certifications", []) if c.get("name")
+    ) or "None"
+
+    msg = client.messages.create(model="claude-sonnet-4-6", max_tokens=4096,
+        messages=[{"role": "user", "content": f"""You are an expert resume writer helping a FRESHER (no prior work experience — a student/recent graduate) build their first resume, tailored to a specific job description, optimized for ATS keyword matching.
+
+STEP 1 — Extract important keywords from the Job Description (skills, tools, technologies, frameworks, domain terms).
+
+STEP 2 — Build a resume that naturally incorporates as many relevant keywords as possible by:
+- Writing a Professional Summary that frames the candidate's education, skills and projects around the JD's needs
+- Rewriting each academic project's description into 2-4 achievement-style bullet points that use relevant JD keywords, WITHOUT inventing outcomes/metrics the candidate didn't provide — infer reasonable, plausible detail from the project description given, don't fabricate specific numbers that weren't implied
+- Organizing the skills section to highlight JD-relevant skills first
+
+HARD RULES (never break these):
+1. This candidate has NO WORK EXPERIENCE — do not invent jobs, companies, or job titles implying employment
+2. Do NOT invent degrees, institutions, or certifications beyond what's given
+3. Do NOT fabricate specific metrics/numbers for projects that weren't provided or clearly implied
+4. Keep name, email, phone, degree, institute, university, year of passing EXACTLY as given
+5. It is fine to include commonly-paired, plausible skills alongside the candidate's stated skills IF clearly appropriate for their stated skill set (e.g. if they list "Python" and the JD wants "REST APIs", it's fine to phrase skills to include API familiarity IF plausible — but never claim a specific certification or tool they never mentioned)
+
+Return ONLY valid JSON — no markdown, no fences, no explanation. Use this EXACT schema:
+{{"name":"string","title":"string (a suitable target job title based on the JD)","contact":"string (email | phone)","summary":"string","experience_heading":"PROJECTS","competencies":[{{"label":"string","value":"string"}}],"experience":[{{"title":"string (project name)","company":"Academic Project","dates":"string (leave blank if not known)","bullets":["string"]}}],"skills":[{{"label":"string","value":"string"}}],"achievements":[],"education":"string","certifications":"string"}}
+
+Candidate details:
+Name: {profile_data.get('full_name','')}
+Email: {profile_data.get('email','')}
+Phone: {profile_data.get('phone','')}
+Degree: {profile_data.get('degree','')}
+Institute: {profile_data.get('institute','')}
+University: {profile_data.get('university','')}
+Year of Passing: {profile_data.get('year_of_passing','')}
+Key Skills: {profile_data.get('key_skills','')}
+
+Academic Projects:
+{projects_text}
+
+Certifications: {certs_text}
+
+Job Description:
+{jd}"""}])
+
+    raw = msg.content[0].text.strip()
+    if "```" in raw:
+        for part in raw.split("```"):
+            part = part.strip().lstrip("json").strip()
+            if part.startswith("{"): raw = part; break
+    start = raw.find("{"); end = raw.rfind("}") + 1
+    if start == -1 or end <= start: raise ValueError("No JSON found")
+    raw = raw[start:end]
+    data = json.loads(raw)
+
+    def s(v, d): return v if v is not None else d
+    data["name"] = s(data.get("name"), profile_data.get("full_name", ""))
+    data["title"] = s(data.get("title"), "")
+    data["contact"] = s(data.get("contact"), f"{profile_data.get('email','')} | {profile_data.get('phone','')}")
+    data["summary"] = s(data.get("summary"), "")
+    data["experience_heading"] = "PROJECTS"
+    data["education"] = s(data.get("education"),
+        f"{profile_data.get('degree','')}, {profile_data.get('institute','')}, {profile_data.get('university','')} — {profile_data.get('year_of_passing','')}")
+    data["certifications"] = s(data.get("certifications"), certs_text if certs_text != "None" else "")
+    data["competencies"] = [c for c in s(data.get("competencies"), []) if c and c.get("label") and c.get("value")]
+    data["skills"] = [sk for sk in s(data.get("skills"), []) if sk and sk.get("label") and sk.get("value")]
+    data["achievements"] = [a for a in s(data.get("achievements"), []) if a]
+    cleaned_exp = []
+    for proj in s(data.get("experience"), []):
+        if not proj: continue
+        cleaned_exp.append({
+            "title": s(proj.get("title"), ""),
+            "company": s(proj.get("company"), "Academic Project"),
+            "dates": s(proj.get("dates"), ""),
+            "bullets": [b for b in s(proj.get("bullets"), []) if b]
+        })
+    data["experience"] = cleaned_exp
+    return data
+
 def make_docx(data):
     doc = DocxDocument()
     for sec in doc.sections:
@@ -903,7 +1002,7 @@ def make_docx(data):
     if data["competencies"]:
         sec("CORE COMPETENCIES")
         for c in data["competencies"]: comp(c["label"],c["value"])
-    sec("WORK EXPERIENCE")
+    sec(data.get("experience_heading", "WORK EXPERIENCE"))
     for job in data["experience"]:
         p=doc.add_paragraph(); p.paragraph_format.space_before=Pt(8); p.paragraph_format.space_after=Pt(2)
         r1=p.add_run(str(job["title"])); r1.bold=True; r1.font.color.rgb=DARK; r1.font.size=Pt(11); r1.font.name="Calibri"
@@ -947,7 +1046,7 @@ def make_pdf(data):
     if data["competencies"]:
         sec("CORE COMPETENCIES")
         for c in data["competencies"]: comp(str(c["label"]),str(c["value"]))
-    sec("WORK EXPERIENCE")
+    sec(data.get("experience_heading", "WORK EXPERIENCE"))
     for job in data["experience"]:
         story.append(Spacer(1,4))
         story.append(Paragraph(
@@ -1438,33 +1537,110 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# ── MODE TOGGLE: Upload Resume vs Fresher (no resume yet) ──
+resume_mode = st.radio("resume_mode_select",
+    ["📄  Upload Resume", "🎓  I'm a Fresher — No Resume Yet"],
+    horizontal=True, label_visibility="collapsed", key="resume_mode_radio")
+st.session_state.is_fresher_mode = (resume_mode == "🎓  I'm a Fresher — No Resume Yet")
+st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
 # ── INPUTS ──
 col1, col2 = st.columns(2, gap="medium")
 with col1:
-    st.markdown("<p style='color:#fff;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px'>📄 Your Resume</p>", unsafe_allow_html=True)
-    resume_file = st.file_uploader(
-        "resume_upload",
-        type=["pdf","doc","docx"],
-        accept_multiple_files=False,
-        label_visibility="collapsed"
-    )
+    if not st.session_state.is_fresher_mode:
+        st.markdown("<p style='color:#fff;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px'>📄 Your Resume</p>", unsafe_allow_html=True)
+        resume_file = st.file_uploader(
+            "resume_upload",
+            type=["pdf","doc","docx"],
+            accept_multiple_files=False,
+            label_visibility="collapsed"
+        )
 
-    # If the uploaded file no longer matches what was actually analyzed
-    # (user swapped in a different resume), the old score/rewrite results
-    # are for a resume that's no longer selected — clear them so the Hero
-    # panel doesn't show stale after-AI data, and so Rewrite is blocked
-    # until the new file is re-analyzed.
-    _current_file_id = get_file_id(resume_file)
-    if st.session_state.analysis_result is not None and _current_file_id != st.session_state.last_analyzed_file:
-        st.session_state.analysis_result = None
-        st.session_state.rewrite_data = None
-        st.session_state.after_score = None
-        st.session_state.after_matched = []
-        st.session_state.after_missing = []
-        st.session_state.last_analyzed_file = None
-        st.session_state.last_analyzed_jd = None
-        st.toast("⚠️ New resume detected — please re-analyze before rewriting.", icon="⚠️")
-        st.rerun()
+        # If the uploaded file no longer matches what was actually analyzed
+        # (user swapped in a different resume), the old score/rewrite results
+        # are for a resume that's no longer selected — clear them so the Hero
+        # panel doesn't show stale after-AI data, and so Rewrite is blocked
+        # until the new file is re-analyzed.
+        _current_file_id = get_file_id(resume_file)
+        if st.session_state.analysis_result is not None and _current_file_id != st.session_state.last_analyzed_file:
+            st.session_state.analysis_result = None
+            st.session_state.rewrite_data = None
+            st.session_state.after_score = None
+            st.session_state.after_matched = []
+            st.session_state.after_missing = []
+            st.session_state.last_analyzed_file = None
+            st.session_state.last_analyzed_jd = None
+            st.toast("⚠️ New resume detected — please re-analyze before rewriting.", icon="⚠️")
+            st.rerun()
+    else:
+        resume_file = None
+        st.markdown("<p style='color:#fff;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px'>🎓 Your Details</p>", unsafe_allow_html=True)
+
+        # Load previously saved fresher data once per session
+        if not st.session_state.fresher_loaded:
+            saved = (profile.get("fresher_profile") or {}) if profile else {}
+            if saved:
+                st.session_state.fresher_full_name = saved.get("full_name", "")
+                st.session_state.fresher_email = saved.get("email", "")
+                st.session_state.fresher_phone = saved.get("phone", "")
+                st.session_state.fresher_degree = saved.get("degree", "")
+                st.session_state.fresher_institute = saved.get("institute", "")
+                st.session_state.fresher_university = saved.get("university", "")
+                st.session_state.fresher_year = saved.get("year_of_passing", "")
+                st.session_state.fresher_skills = saved.get("key_skills", "")
+                if saved.get("projects"):
+                    st.session_state.fresher_projects = saved["projects"]
+                if saved.get("certifications"):
+                    st.session_state.fresher_certifications = saved["certifications"]
+            st.session_state.fresher_loaded = True
+
+        fc1, fc2 = st.columns(2)
+        with fc1:
+            st.text_input("Full Name", key="fresher_full_name", placeholder="Jane Doe")
+            st.text_input("Degree", key="fresher_degree", placeholder="B.Tech Computer Science")
+            st.text_input("Institute", key="fresher_institute", placeholder="XYZ Institute of Technology")
+            st.text_input("Year of Passing", key="fresher_year", placeholder="2026")
+        with fc2:
+            st.text_input("Email", key="fresher_email", placeholder="jane@email.com")
+            st.text_input("Phone", key="fresher_phone", placeholder="+91 98765 43210")
+            st.text_input("University", key="fresher_university", placeholder="XYZ University")
+            st.text_input("Key Skills (comma separated)", key="fresher_skills", placeholder="Python, SQL, React, Git")
+
+        st.markdown("<div style='font-size:11px;color:#888;font-weight:700;margin:10px 0 4px'>ACADEMIC PROJECTS</div>", unsafe_allow_html=True)
+        for i, proj in enumerate(st.session_state.fresher_projects):
+            pc1, pc2, pc3 = st.columns([2, 3, 0.5])
+            with pc1:
+                st.session_state.fresher_projects[i]["name"] = st.text_input(
+                    "Project name", value=proj.get("name", ""), key=f"fresher_proj_name_{i}",
+                    placeholder="Project name", label_visibility="collapsed")
+            with pc2:
+                st.session_state.fresher_projects[i]["description"] = st.text_input(
+                    "Description", value=proj.get("description", ""), key=f"fresher_proj_desc_{i}",
+                    placeholder="Brief description — what it does, tech used", label_visibility="collapsed")
+            with pc3:
+                if len(st.session_state.fresher_projects) > 1:
+                    if st.button("✕", key=f"fresher_proj_remove_{i}"):
+                        st.session_state.fresher_projects.pop(i)
+                        st.rerun()
+        if st.button("+ Add another project", key="fresher_add_project"):
+            st.session_state.fresher_projects.append({"name": "", "description": ""})
+            st.rerun()
+
+        st.markdown("<div style='font-size:11px;color:#888;font-weight:700;margin:14px 0 4px'>CERTIFICATIONS</div>", unsafe_allow_html=True)
+        for i, cert in enumerate(st.session_state.fresher_certifications):
+            cc1, cc2 = st.columns([5, 0.5])
+            with cc1:
+                st.session_state.fresher_certifications[i]["name"] = st.text_input(
+                    "Certification", value=cert.get("name", ""), key=f"fresher_cert_name_{i}",
+                    placeholder="e.g. AWS Cloud Practitioner", label_visibility="collapsed")
+            with cc2:
+                if len(st.session_state.fresher_certifications) > 1:
+                    if st.button("✕", key=f"fresher_cert_remove_{i}"):
+                        st.session_state.fresher_certifications.pop(i)
+                        st.rerun()
+        if st.button("+ Add another certification", key="fresher_add_cert"):
+            st.session_state.fresher_certifications.append({"name": ""})
+            st.rerun()
 
 with col2:
     st.markdown("<p style='color:#fff;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px'>💼 Job Description</p>", unsafe_allow_html=True)
@@ -1474,330 +1650,470 @@ with col2:
 
 st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
 
-# ── TABS ──
-has_score = st.session_state.analysis_result is not None
+if not st.session_state.is_fresher_mode:
+    # ── TABS ──
+    has_score = st.session_state.analysis_result is not None
 
-# ── TABS ── rewrite disabled until scored
-tab_choice = st.radio("tab_select",
-    ["📊  Score my resume", "✨  Rewrite with AI"],
-    horizontal=True, label_visibility="collapsed")
-st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+    # ── TABS ── rewrite disabled until scored
+    tab_choice = st.radio("tab_select",
+        ["📊  Score my resume", "✨  Rewrite with AI"],
+        horizontal=True, label_visibility="collapsed")
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
 
-# Show lock message if rewrite selected but no score yet
-if tab_choice == "✨  Rewrite with AI" and not has_score:
+    # Show lock message if rewrite selected but no score yet
+    if tab_choice == "✨  Rewrite with AI" and not has_score:
+        st.markdown("""
+    <div style="background:#2a1f0a;border:1px solid #5a4010;border-radius:10px;padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+      <span style="font-size:24px">🔒</span>
+      <div>
+        <div style="color:#F59E0B;font-weight:700;font-size:13px;margin-bottom:3px">Score your resume first</div>
+        <div style="color:#888;font-size:12px">Switch to the <b style="color:#fff">Score my resume</b> tab, analyze your resume against the JD, then come back to rewrite.</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── JS: injected in main CSS block ──
     st.markdown("""
-<div style="background:#2a1f0a;border:1px solid #5a4010;border-radius:10px;padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
-  <span style="font-size:24px">🔒</span>
-  <div>
-    <div style="color:#F59E0B;font-weight:700;font-size:13px;margin-bottom:3px">Score your resume first</div>
-    <div style="color:#888;font-size:12px">Switch to the <b style="color:#fff">Score my resume</b> tab, analyze your resume against the JD, then come back to rewrite.</div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+    <script>
+    function fixUploadButton() {
+        var btn = document.querySelector('[data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"]');
+        if (!btn || btn.dataset.fixed) return;
+        // Remove icon from DOM entirely — no layout side effects
+        btn.querySelectorAll('[data-testid="stIconMaterial"]').forEach(icon => icon.remove());
+        // Set clean text only
+        btn.innerHTML = 'UPLOAD';
+        btn.style.cssText = 'width:100%!important;display:block!important;text-align:center!important;background:#F59E0B!important;color:#1a1a1a!important;border:none!important;border-radius:8px!important;padding:12px 24px!important;font-weight:800!important;font-size:13px!important;text-transform:uppercase!important;letter-spacing:0.06em!important;font-family:Inter,sans-serif!important;cursor:pointer!important;box-sizing:border-box!important;line-height:normal!important;';
+        btn.dataset.fixed = '1';
+    }
 
-# ── JS: injected in main CSS block ──
-st.markdown("""
-<script>
-function fixUploadButton() {
-    var btn = document.querySelector('[data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"]');
-    if (!btn || btn.dataset.fixed) return;
-    // Remove icon from DOM entirely — no layout side effects
-    btn.querySelectorAll('[data-testid="stIconMaterial"]').forEach(icon => icon.remove());
-    // Set clean text only
-    btn.innerHTML = 'UPLOAD';
-    btn.style.cssText = 'width:100%!important;display:block!important;text-align:center!important;background:#F59E0B!important;color:#1a1a1a!important;border:none!important;border-radius:8px!important;padding:12px 24px!important;font-weight:800!important;font-size:13px!important;text-transform:uppercase!important;letter-spacing:0.06em!important;font-family:Inter,sans-serif!important;cursor:pointer!important;box-sizing:border-box!important;line-height:normal!important;';
-    btn.dataset.fixed = '1';
-}
+    function fixExpander() {
+        // Hide the material arrow icon text content inside expander summary
+        // It renders as stIconMaterial with text "keyboard_arrow_right/down"
+        document.querySelectorAll('[data-testid="stExpander"] summary [data-testid="stIconMaterial"]').forEach(icon => {
+            icon.style.fontSize = '0';
+            icon.style.overflow = 'hidden';
+            icon.style.width = '16px';
+            icon.style.height = '16px';
+            icon.style.display = 'inline-block';
+        });
+        // Ensure label text is visible and styled
+        document.querySelectorAll('[data-testid="stExpander"] summary p').forEach(p => {
+            p.style.color = '#aaa';
+            p.style.fontSize = '13px';
+            p.style.fontWeight = '600';
+        });
+    }
 
-function fixExpander() {
-    // Hide the material arrow icon text content inside expander summary
-    // It renders as stIconMaterial with text "keyboard_arrow_right/down"
-    document.querySelectorAll('[data-testid="stExpander"] summary [data-testid="stIconMaterial"]').forEach(icon => {
-        icon.style.fontSize = '0';
-        icon.style.overflow = 'hidden';
-        icon.style.width = '16px';
-        icon.style.height = '16px';
-        icon.style.display = 'inline-block';
-    });
-    // Ensure label text is visible and styled
-    document.querySelectorAll('[data-testid="stExpander"] summary p').forEach(p => {
-        p.style.color = '#aaa';
-        p.style.fontSize = '13px';
-        p.style.fontWeight = '600';
-    });
-}
+    setTimeout(fixUploadButton, 200);
+    setTimeout(fixUploadButton, 600);
+    setInterval(fixUploadButton, 2000);
+    setTimeout(fixExpander, 200);
+    setTimeout(fixExpander, 600);
+    setTimeout(fixExpander, 1200);
+    setInterval(fixExpander, 2500);
+    </script>
+    """, unsafe_allow_html=True)
 
-setTimeout(fixUploadButton, 200);
-setTimeout(fixUploadButton, 600);
-setInterval(fixUploadButton, 2000);
-setTimeout(fixExpander, 200);
-setTimeout(fixExpander, 600);
-setTimeout(fixExpander, 1200);
-setInterval(fixExpander, 2500);
-</script>
-""", unsafe_allow_html=True)
+    def validate():
+        ok = True
+        if not resume_file:
+            st.markdown('<div class="warn-badge">⚠️ Upload your resume to continue.</div>', unsafe_allow_html=True)
+            ok = False
+        elif not jd_text.strip():
+            st.markdown('<div class="warn-badge">⚠️ Paste a job description to continue.</div>', unsafe_allow_html=True)
+            ok = False
+        return ok
 
-def validate():
-    ok = True
-    if not resume_file:
-        st.markdown('<div class="warn-badge">⚠️ Upload your resume to continue.</div>', unsafe_allow_html=True)
-        ok = False
-    elif not jd_text.strip():
-        st.markdown('<div class="warn-badge">⚠️ Paste a job description to continue.</div>', unsafe_allow_html=True)
-        ok = False
-    return ok
-
-# ════════════════════════
-# SCORE TAB
-# ════════════════════════
-if tab_choice == "📊  Score my resume":
-    c1, c2 = st.columns([5,1], gap="small")
-    with c1:
-        if not user_is_pro and scans_left <= 0:
-            st.markdown("""
-<div style="background:#2a1010;border:1px solid #5a2020;border-radius:10px;padding:16px 20px;margin-bottom:12px;text-align:center">
-  <div style="color:#f87171;font-weight:700;font-size:14px;margin-bottom:6px">You have used all 3 free scans this month</div>
-  <div style="color:#888;font-size:12px;margin-bottom:12px">Upgrade to Pro for unlimited scans, AI rewrite and downloads.</div>
-</div>
-""", unsafe_allow_html=True)
-            render_upgrade_cta("scanlimit")
-            analyze_clicked = False
-        else:
-            analyze_clicked = st.button("Analyze now", type="primary",
-                use_container_width=True, key="btn_analyze",
-                disabled=st.session_state.processing)
-    with c2:
-        if st.button("Clear", type="secondary", use_container_width=True, key="btn_clear"):
-            st.session_state.analysis_result = None
-            st.session_state.last_analyzed_file = None
-            st.session_state.last_analyzed_jd = None
-            st.rerun()
-
-    if analyze_clicked and not st.session_state.processing:
-        if validate():
-            if (get_file_id(resume_file) == st.session_state.last_analyzed_file and
-                jd_text.strip() == st.session_state.last_analyzed_jd):
-                st.markdown('<div class="info-badge">ℹ️ Already analyzed this combination. Change the resume or JD to analyze again.</div>', unsafe_allow_html=True)
+    # ════════════════════════
+    # SCORE TAB
+    # ════════════════════════
+    if tab_choice == "📊  Score my resume":
+        c1, c2 = st.columns([5,1], gap="small")
+        with c1:
+            if not user_is_pro and scans_left <= 0:
+                st.markdown("""
+    <div style="background:#2a1010;border:1px solid #5a2020;border-radius:10px;padding:16px 20px;margin-bottom:12px;text-align:center">
+      <div style="color:#f87171;font-weight:700;font-size:14px;margin-bottom:6px">You have used all 3 free scans this month</div>
+      <div style="color:#888;font-size:12px;margin-bottom:12px">Upgrade to Pro for unlimited scans, AI rewrite and downloads.</div>
+    </div>
+    """, unsafe_allow_html=True)
+                render_upgrade_cta("scanlimit")
+                analyze_clicked = False
             else:
-                st.session_state.processing = True
-                with st.spinner("Analyzing your resume against the job description..."):
-                    try:
-                        # Check scan limit for free users
-                        if not user_is_pro and scans_left <= 0:
-                            st.markdown('<div class="warn-badge">You have used all 3 free scans this month. Upgrade to Pro for unlimited scans.</div>', unsafe_allow_html=True)
-                            st.stop()
-                        rt = extract_text(resume_file)
-                        scored = score_resume(rt, jd_text)
-                        sugs   = get_suggestions(rt, jd_text, scored["score"], scored["missing"])
-                        scored["suggestions"] = sugs
-                        st.session_state.analysis_result = scored
-                        st.session_state.last_analyzed_file = get_file_id(resume_file)
-                        st.session_state.last_analyzed_jd = jd_text.strip()
-                        # Increment scan count for free users
-                        if not user_is_pro:
-                            current_used = st.session_state.profile.get("scans_used", 0) if st.session_state.profile else 0
-                            sb_increment_scan(st.session_state.access_token, st.session_state.user["id"], current_used)
-                            # Update local profile so counter reflects immediately
-                            if st.session_state.profile:
-                                st.session_state.profile["scans_used"] = current_used + 1
-                    except Exception as e:
-                        st.error(f"⚠️ Error: {str(e)[:200]}")
-                    finally:
-                        st.session_state.processing = False
+                analyze_clicked = st.button("Analyze now", type="primary",
+                    use_container_width=True, key="btn_analyze",
+                    disabled=st.session_state.processing)
+        with c2:
+            if st.button("Clear", type="secondary", use_container_width=True, key="btn_clear"):
+                st.session_state.analysis_result = None
+                st.session_state.last_analyzed_file = None
+                st.session_state.last_analyzed_jd = None
                 st.rerun()
 
-    if st.session_state.analysis_result:
-        p = st.session_state.analysis_result
-        score = p["score"]
-        if score >= 80:
-            verdict = "🎉 Great fit for this position!"
-            score_color = "#22c55e"
-            verdict_color = "#22c55e"
-        elif score >= 65:
-            verdict = "Good — room to improve"
-            score_color = "#F59E0B"
-            verdict_color = "#F59E0B"
-        else:
-            verdict = "Needs work — use AI rewrite"
-            score_color = "#ef4444"
-            verdict_color = "#ef4444"
-        sugs_label = "How to stand out further" if score >= 80 else "How to improve your score" if score >= 65 else "Critical gaps to fix"
-        mh  = "".join(f'<span class="kw hit">{k} ✓</span>' for k in p["matched"] if k)
-        msh = "".join(f'<span class="kw miss">{k} ✗</span>' for k in p["missing"] if k)
-        sh  = "".join(f'<div class="sug-item"><div class="sug-n">0{i+1}</div><div class="sug-t">{s}</div></div>'
-                      for i,s in enumerate(p.get("suggestions",[])[:5]) if s)
-        st.markdown(f"""
-<div class="results-wrap">
-  <div class="score-panel">
-    <div class="sp-label">ATS score</div>
-    <div class="sp-num" style="color:{score_color}">{score}</div>
-    <div class="sp-denom">out of 100</div>
-    <div class="sp-bar"><div class="sp-bar-fill" style="width:{min(score,100)}%;background:{score_color}"></div></div>
-    <div class="sp-verdict" style="color:{verdict_color};font-weight:600">{verdict}</div>
-  </div>
-  <div class="detail-panel">
-    <div class="dp-section">Matched keywords</div>
-    <div class="kw-group">{mh or '<span style="color:#555;font-size:11px;">None found</span>'}</div>
-    <div class="dp-section">Missing keywords</div>
-    <div class="kw-group">{msh or '<span style="color:#4ade80;font-size:11px;">All matched!</span>'}</div>
-    <div class="dp-section">{sugs_label}</div>
-    <div class="suggestions">{sh}</div>
-  </div>
-</div>""", unsafe_allow_html=True)
+        if analyze_clicked and not st.session_state.processing:
+            if validate():
+                if (get_file_id(resume_file) == st.session_state.last_analyzed_file and
+                    jd_text.strip() == st.session_state.last_analyzed_jd):
+                    st.markdown('<div class="info-badge">ℹ️ Already analyzed this combination. Change the resume or JD to analyze again.</div>', unsafe_allow_html=True)
+                else:
+                    st.session_state.processing = True
+                    with st.spinner("Analyzing your resume against the job description..."):
+                        try:
+                            # Check scan limit for free users
+                            if not user_is_pro and scans_left <= 0:
+                                st.markdown('<div class="warn-badge">You have used all 3 free scans this month. Upgrade to Pro for unlimited scans.</div>', unsafe_allow_html=True)
+                                st.stop()
+                            rt = extract_text(resume_file)
+                            scored = score_resume(rt, jd_text)
+                            sugs   = get_suggestions(rt, jd_text, scored["score"], scored["missing"])
+                            scored["suggestions"] = sugs
+                            st.session_state.analysis_result = scored
+                            st.session_state.last_analyzed_file = get_file_id(resume_file)
+                            st.session_state.last_analyzed_jd = jd_text.strip()
+                            # Increment scan count for free users
+                            if not user_is_pro:
+                                current_used = st.session_state.profile.get("scans_used", 0) if st.session_state.profile else 0
+                                sb_increment_scan(st.session_state.access_token, st.session_state.user["id"], current_used)
+                                # Update local profile so counter reflects immediately
+                                if st.session_state.profile:
+                                    st.session_state.profile["scans_used"] = current_used + 1
+                        except Exception as e:
+                            st.error(f"⚠️ Error: {str(e)[:200]}")
+                        finally:
+                            st.session_state.processing = False
+                    st.rerun()
 
-# ════════════════════════
-# REWRITE TAB
-# ════════════════════════
-elif tab_choice == "✨  Rewrite with AI" and has_score:
-    # Show upgrade banner for free users
+        if st.session_state.analysis_result:
+            p = st.session_state.analysis_result
+            score = p["score"]
+            if score >= 80:
+                verdict = "🎉 Great fit for this position!"
+                score_color = "#22c55e"
+                verdict_color = "#22c55e"
+            elif score >= 65:
+                verdict = "Good — room to improve"
+                score_color = "#F59E0B"
+                verdict_color = "#F59E0B"
+            else:
+                verdict = "Needs work — use AI rewrite"
+                score_color = "#ef4444"
+                verdict_color = "#ef4444"
+            sugs_label = "How to stand out further" if score >= 80 else "How to improve your score" if score >= 65 else "Critical gaps to fix"
+            mh  = "".join(f'<span class="kw hit">{k} ✓</span>' for k in p["matched"] if k)
+            msh = "".join(f'<span class="kw miss">{k} ✗</span>' for k in p["missing"] if k)
+            sh  = "".join(f'<div class="sug-item"><div class="sug-n">0{i+1}</div><div class="sug-t">{s}</div></div>'
+                          for i,s in enumerate(p.get("suggestions",[])[:5]) if s)
+            st.markdown(f"""
+    <div class="results-wrap">
+      <div class="score-panel">
+        <div class="sp-label">ATS score</div>
+        <div class="sp-num" style="color:{score_color}">{score}</div>
+        <div class="sp-denom">out of 100</div>
+        <div class="sp-bar"><div class="sp-bar-fill" style="width:{min(score,100)}%;background:{score_color}"></div></div>
+        <div class="sp-verdict" style="color:{verdict_color};font-weight:600">{verdict}</div>
+      </div>
+      <div class="detail-panel">
+        <div class="dp-section">Matched keywords</div>
+        <div class="kw-group">{mh or '<span style="color:#555;font-size:11px;">None found</span>'}</div>
+        <div class="dp-section">Missing keywords</div>
+        <div class="kw-group">{msh or '<span style="color:#4ade80;font-size:11px;">All matched!</span>'}</div>
+        <div class="dp-section">{sugs_label}</div>
+        <div class="suggestions">{sh}</div>
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    # ════════════════════════
+    # REWRITE TAB
+    # ════════════════════════
+    elif tab_choice == "✨  Rewrite with AI" and has_score:
+        # Show upgrade banner for free users
+        if not user_is_pro:
+            st.markdown("""
+    <div style="background:#2a1f0a;border:1px solid #5a4010;border-radius:10px;padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="color:#F59E0B;font-weight:700;font-size:13px;margin-bottom:3px">Pro feature — AI Resume Rewrite</div>
+        <div style="color:#888;font-size:12px">Upgrade to Pro (Rs.199/month) to unlock unlimited rewrites, PDF/DOCX downloads and more.</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+            render_upgrade_cta("rewritetab")
+            st.stop()
+
+        c3, c4 = st.columns([5,1], gap="small")
+        with c3:
+            rewrite_clicked = st.button("Rewrite with AI ->", type="primary",
+                use_container_width=True, key="btn_rewrite",
+                disabled=st.session_state.processing)
+        with c4:
+            if st.button("Clear", type="secondary", use_container_width=True, key="btn_clear2"):
+                st.session_state.rewrite_data = None
+                st.session_state.docx_bytes = None
+                st.session_state.pdf_bytes = None
+                st.session_state.after_score = None
+                st.session_state.after_matched = []
+                st.session_state.after_missing = []
+                st.session_state.last_rewritten_file = None
+                st.session_state.last_rewritten_jd = None
+                st.rerun()
+
+        if rewrite_clicked and not st.session_state.processing:
+            if validate():
+                if (get_file_id(resume_file) == st.session_state.last_rewritten_file and
+                    jd_text.strip() == st.session_state.last_rewritten_jd):
+                    st.markdown('<div class="info-badge">ℹ️ Already rewritten. Change resume or JD to rewrite again.</div>', unsafe_allow_html=True)
+                else:
+                    st.session_state.processing = True
+                    with st.spinner("✨ Rewriting your resume and scoring the result..."):
+                        try:
+                            rt = extract_text(resume_file)
+                            # Step 1: Rewrite aggressively for ATS
+                            data = do_rewrite(rt, jd_text)
+                            # Step 2: Build complete text from ALL rewritten fields for scoring
+                            rewritten_parts = [
+                                data.get("name",""),
+                                data.get("title",""),
+                                data.get("contact",""),
+                                data.get("summary",""),
+                            ]
+                            for c in data.get("competencies",[]):
+                                rewritten_parts.append(f"{c.get('label','')} {c.get('value','')}")
+                            for j in data.get("experience",[]):
+                                rewritten_parts.append(f"{j.get('title','')} {j.get('company','')} {j.get('dates','')}")
+                                for b in j.get("bullets",[]):
+                                    rewritten_parts.append(b)
+                            for sk in data.get("skills",[]):
+                                rewritten_parts.append(f"{sk.get('label','')} {sk.get('value','')}")
+                            for a in data.get("achievements",[]):
+                                rewritten_parts.append(a)
+                            rewritten_parts.append(data.get("education",""))
+                            rewritten_parts.append(data.get("certifications",""))
+                            rewritten_text = "\n".join(p for p in rewritten_parts if p)
+                            after_scored = score_resume(rewritten_text, jd_text)
+                            # Store everything
+                            st.session_state.rewrite_data = data
+                            st.session_state.docx_bytes = make_docx(data)
+                            st.session_state.pdf_bytes  = make_pdf(data)
+                            st.session_state.after_score   = after_scored["score"]
+                            st.session_state.after_matched = after_scored["matched"]
+                            st.session_state.after_missing = after_scored["missing"]
+                            st.session_state.last_rewritten_file = get_file_id(resume_file)
+                            st.session_state.last_rewritten_jd = jd_text.strip()
+                        except Exception as e:
+                            st.error(f"⚠️ Rewrite failed: {str(e)[:300]}. Please try again.")
+                        finally:
+                            st.session_state.processing = False
+                    st.rerun()
+
+        if st.session_state.rewrite_data and st.session_state.pdf_bytes:
+            data = st.session_state.rewrite_data
+            st.markdown("""
+    <div class="dl-bar">
+      <div class="dl-bar-title">Your optimized resume is ready ✓</div>
+      <div class="dl-bar-sub">ATS score updated in the dashboard above · Download both formats below</div>
+    </div>""", unsafe_allow_html=True)
+            d1, d2 = st.columns(2, gap="medium")
+            with d1:
+                st.download_button("⬇  Download PDF",
+                    data=st.session_state.pdf_bytes,
+                    file_name="ProfileIQ_Resume.pdf", mime="application/pdf",
+                    use_container_width=True, key="dl_pdf")
+            with d2:
+                st.download_button("⬇  Download Word (.docx)",
+                    data=st.session_state.docx_bytes,
+                    file_name="ProfileIQ_Resume.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True, key="dl_docx")
+
+            # ── FULL PREVIEW ──
+            with st.expander("Preview rewritten resume"):
+                d = st.session_state.rewrite_data
+
+                # Header
+                st.markdown(f"<div style='font-size:22px;font-weight:900;color:#fff;margin-bottom:4px'>{d.get('name','')}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='font-size:13px;color:#F59E0B;font-weight:600;margin-bottom:6px'>{d.get('title','')}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='font-size:11px;color:#666;margin-bottom:16px'>{d.get('contact','')}</div>", unsafe_allow_html=True)
+                st.divider()
+
+                # Summary
+                st.markdown("<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px'>Professional Summary</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='font-size:12px;color:#aaa;line-height:1.7'>{d.get('summary','')}</div>", unsafe_allow_html=True)
+
+                # Competencies
+                if d.get("competencies"):
+                    st.divider()
+                    st.markdown("<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px'>Core Competencies</div>", unsafe_allow_html=True)
+                    for c in d["competencies"]:
+                        st.markdown(f"<div style='font-size:12px;color:#aaa;margin-bottom:4px'><span style='color:#fff;font-weight:700'>{c['label']}</span> &nbsp; {c['value']}</div>", unsafe_allow_html=True)
+
+                # Experience
+                st.divider()
+                st.markdown(f"<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:10px'>{d.get('experience_heading', 'Work Experience').title()}</div>", unsafe_allow_html=True)
+                for job in d.get("experience", []):
+                    st.markdown(f"<div style='font-size:13px;font-weight:700;color:#fff;margin-bottom:2px;margin-top:12px'>{job.get('title','')} &nbsp;|&nbsp; <span style='color:#F59E0B'>{job.get('company','')}</span></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:11px;color:#666;margin-bottom:6px'>{job.get('dates','')}</div>", unsafe_allow_html=True)
+                    for b in job.get("bullets", []):
+                        st.markdown(f"<div style='font-size:12px;color:#aaa;line-height:1.6;padding-left:14px;margin-bottom:3px'>▸ &nbsp;{b}</div>", unsafe_allow_html=True)
+
+                # Skills
+                if d.get("skills"):
+                    st.divider()
+                    st.markdown("<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px'>Technical Skills</div>", unsafe_allow_html=True)
+                    for s in d["skills"]:
+                        st.markdown(f"<div style='font-size:12px;color:#aaa;margin-bottom:4px'><span style='color:#fff;font-weight:700'>{s['label']}</span> &nbsp; {s['value']}</div>", unsafe_allow_html=True)
+
+                # Achievements
+                if d.get("achievements"):
+                    st.divider()
+                    st.markdown("<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px'>Key Achievements</div>", unsafe_allow_html=True)
+                    for a in d["achievements"]:
+                        st.markdown(f"<div style='font-size:12px;color:#aaa;line-height:1.6;padding-left:14px;margin-bottom:3px'>▸ &nbsp;{a}</div>", unsafe_allow_html=True)
+
+                # Education
+                st.divider()
+                st.markdown("<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px'>Education</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='font-size:12px;color:#aaa'>{d.get('education','')}</div>", unsafe_allow_html=True)
+
+                # Certifications
+                if d.get("certifications"):
+                    st.divider()
+                    st.markdown("<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px'>Certifications & Languages</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:12px;color:#aaa'>{d.get('certifications','')}</div>", unsafe_allow_html=True)
+
+else:
+    # ════════════════════════
+    # FRESHER: BUILD RESUME
+    # ════════════════════════
     if not user_is_pro:
         st.markdown("""
 <div style="background:#2a1f0a;border:1px solid #5a4010;border-radius:10px;padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">
   <div>
-    <div style="color:#F59E0B;font-weight:700;font-size:13px;margin-bottom:3px">Pro feature — AI Resume Rewrite</div>
-    <div style="color:#888;font-size:12px">Upgrade to Pro (Rs.199/month) to unlock unlimited rewrites, PDF/DOCX downloads and more.</div>
+    <div style="color:#F59E0B;font-weight:700;font-size:13px;margin-bottom:3px">Pro feature — Build Resume for Freshers</div>
+    <div style="color:#888;font-size:12px">Upgrade to Pro (Rs.199/month) to build a fully AI-optimized resume from your education, projects and skills.</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
-        render_upgrade_cta("rewritetab")
+        render_upgrade_cta("freshertab")
         st.stop()
 
-    c3, c4 = st.columns([5,1], gap="small")
-    with c3:
-        rewrite_clicked = st.button("Rewrite with AI ->", type="primary",
-            use_container_width=True, key="btn_rewrite",
-            disabled=st.session_state.processing)
-    with c4:
-        if st.button("Clear", type="secondary", use_container_width=True, key="btn_clear2"):
-            st.session_state.rewrite_data = None
-            st.session_state.docx_bytes = None
-            st.session_state.pdf_bytes = None
-            st.session_state.after_score = None
-            st.session_state.after_matched = []
-            st.session_state.after_missing = []
-            st.session_state.last_rewritten_file = None
-            st.session_state.last_rewritten_jd = None
-            st.rerun()
+    build_clicked = st.button("Build My Resume ->", type="primary",
+        use_container_width=True, key="btn_build_fresher",
+        disabled=st.session_state.processing)
 
-    if rewrite_clicked and not st.session_state.processing:
-        if validate():
-            if (get_file_id(resume_file) == st.session_state.last_rewritten_file and
-                jd_text.strip() == st.session_state.last_rewritten_jd):
-                st.markdown('<div class="info-badge">ℹ️ Already rewritten. Change resume or JD to rewrite again.</div>', unsafe_allow_html=True)
-            else:
-                st.session_state.processing = True
-                with st.spinner("✨ Rewriting your resume and scoring the result..."):
-                    try:
-                        rt = extract_text(resume_file)
-                        # Step 1: Rewrite aggressively for ATS
-                        data = do_rewrite(rt, jd_text)
-                        # Step 2: Build complete text from ALL rewritten fields for scoring
-                        rewritten_parts = [
-                            data.get("name",""),
-                            data.get("title",""),
-                            data.get("contact",""),
-                            data.get("summary",""),
-                        ]
-                        for c in data.get("competencies",[]):
-                            rewritten_parts.append(f"{c.get('label','')} {c.get('value','')}")
-                        for j in data.get("experience",[]):
-                            rewritten_parts.append(f"{j.get('title','')} {j.get('company','')} {j.get('dates','')}")
-                            for b in j.get("bullets",[]):
-                                rewritten_parts.append(b)
-                        for sk in data.get("skills",[]):
-                            rewritten_parts.append(f"{sk.get('label','')} {sk.get('value','')}")
-                        for a in data.get("achievements",[]):
-                            rewritten_parts.append(a)
-                        rewritten_parts.append(data.get("education",""))
-                        rewritten_parts.append(data.get("certifications",""))
-                        rewritten_text = "\n".join(p for p in rewritten_parts if p)
-                        after_scored = score_resume(rewritten_text, jd_text)
-                        # Store everything
-                        st.session_state.rewrite_data = data
-                        st.session_state.docx_bytes = make_docx(data)
-                        st.session_state.pdf_bytes  = make_pdf(data)
-                        st.session_state.after_score   = after_scored["score"]
-                        st.session_state.after_matched = after_scored["matched"]
-                        st.session_state.after_missing = after_scored["missing"]
-                        st.session_state.last_rewritten_file = get_file_id(resume_file)
-                        st.session_state.last_rewritten_jd = jd_text.strip()
-                    except Exception as e:
-                        st.error(f"⚠️ Rewrite failed: {str(e)[:300]}. Please try again.")
-                    finally:
-                        st.session_state.processing = False
-                st.rerun()
+    if build_clicked and not st.session_state.processing:
+        fresher_data = {
+            "full_name": st.session_state.get("fresher_full_name", "").strip(),
+            "email": st.session_state.get("fresher_email", "").strip(),
+            "phone": st.session_state.get("fresher_phone", "").strip(),
+            "degree": st.session_state.get("fresher_degree", "").strip(),
+            "institute": st.session_state.get("fresher_institute", "").strip(),
+            "university": st.session_state.get("fresher_university", "").strip(),
+            "year_of_passing": st.session_state.get("fresher_year", "").strip(),
+            "key_skills": st.session_state.get("fresher_skills", "").strip(),
+            "projects": [p for p in st.session_state.fresher_projects if p.get("name", "").strip()],
+            "certifications": [c for c in st.session_state.fresher_certifications if c.get("name", "").strip()],
+        }
+        missing_fields = []
+        if not fresher_data["full_name"]: missing_fields.append("Full Name")
+        if not fresher_data["email"]: missing_fields.append("Email")
+        if not fresher_data["degree"]: missing_fields.append("Degree")
+        if not fresher_data["institute"]: missing_fields.append("Institute")
+        if not fresher_data["key_skills"]: missing_fields.append("Key Skills")
+        if not jd_text.strip(): missing_fields.append("Job Description")
+
+        if missing_fields:
+            st.markdown(f'<div class="auth-error">⚠️ Please fill in: {", ".join(missing_fields)}</div>', unsafe_allow_html=True)
+        else:
+            st.session_state.processing = True
+            with st.spinner("✨ Building your resume and scoring it against the job description..."):
+                try:
+                    data = build_fresher_resume(fresher_data, jd_text)
+                    rewritten_parts = [
+                        data.get("name",""), data.get("title",""), data.get("contact",""), data.get("summary",""),
+                    ]
+                    for c in data.get("competencies",[]):
+                        rewritten_parts.append(f"{c.get('label','')} {c.get('value','')}")
+                    for j in data.get("experience",[]):
+                        rewritten_parts.append(f"{j.get('title','')} {j.get('company','')} {j.get('dates','')}")
+                        for b in j.get("bullets",[]):
+                            rewritten_parts.append(b)
+                    for sk in data.get("skills",[]):
+                        rewritten_parts.append(f"{sk.get('label','')} {sk.get('value','')}")
+                    rewritten_parts.append(data.get("education",""))
+                    rewritten_parts.append(data.get("certifications",""))
+                    rewritten_text = "\n".join(p for p in rewritten_parts if p)
+                    after_scored = score_resume(rewritten_text, jd_text)
+
+                    st.session_state.rewrite_data = data
+                    st.session_state.docx_bytes = make_docx(data)
+                    st.session_state.pdf_bytes  = make_pdf(data)
+                    st.session_state.after_score   = after_scored["score"]
+                    st.session_state.after_matched = after_scored["matched"]
+                    st.session_state.after_missing = after_scored["missing"]
+
+                    # Save fresher data for next time
+                    sb_save_fresher_profile(st.session_state.access_token, st.session_state.user["id"], fresher_data)
+                except Exception as e:
+                    st.error(f"⚠️ Build failed: {str(e)[:300]}. Please try again.")
+                finally:
+                    st.session_state.processing = False
+            st.rerun()
 
     if st.session_state.rewrite_data and st.session_state.pdf_bytes:
         data = st.session_state.rewrite_data
         st.markdown("""
 <div class="dl-bar">
-  <div class="dl-bar-title">Your optimized resume is ready ✓</div>
-  <div class="dl-bar-sub">ATS score updated in the dashboard above · Download both formats below</div>
+  <div class="dl-bar-title">Your resume is ready ✓</div>
+  <div class="dl-bar-sub">ATS score shown in the dashboard above · Download both formats below</div>
 </div>""", unsafe_allow_html=True)
         d1, d2 = st.columns(2, gap="medium")
         with d1:
             st.download_button("⬇  Download PDF",
                 data=st.session_state.pdf_bytes,
                 file_name="ProfileIQ_Resume.pdf", mime="application/pdf",
-                use_container_width=True, key="dl_pdf")
+                use_container_width=True, key="dl_pdf_fresher")
         with d2:
             st.download_button("⬇  Download Word (.docx)",
                 data=st.session_state.docx_bytes,
                 file_name="ProfileIQ_Resume.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True, key="dl_docx")
+                use_container_width=True, key="dl_docx_fresher")
 
-        # ── FULL PREVIEW ──
-        with st.expander("Preview rewritten resume"):
+        with st.expander("Preview your resume"):
             d = st.session_state.rewrite_data
-
-            # Header
             st.markdown(f"<div style='font-size:22px;font-weight:900;color:#fff;margin-bottom:4px'>{d.get('name','')}</div>", unsafe_allow_html=True)
             st.markdown(f"<div style='font-size:13px;color:#F59E0B;font-weight:600;margin-bottom:6px'>{d.get('title','')}</div>", unsafe_allow_html=True)
             st.markdown(f"<div style='font-size:11px;color:#666;margin-bottom:16px'>{d.get('contact','')}</div>", unsafe_allow_html=True)
             st.divider()
 
-            # Summary
             st.markdown("<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px'>Professional Summary</div>", unsafe_allow_html=True)
             st.markdown(f"<div style='font-size:12px;color:#aaa;line-height:1.7'>{d.get('summary','')}</div>", unsafe_allow_html=True)
 
-            # Competencies
             if d.get("competencies"):
                 st.divider()
                 st.markdown("<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px'>Core Competencies</div>", unsafe_allow_html=True)
                 for c in d["competencies"]:
                     st.markdown(f"<div style='font-size:12px;color:#aaa;margin-bottom:4px'><span style='color:#fff;font-weight:700'>{c['label']}</span> &nbsp; {c['value']}</div>", unsafe_allow_html=True)
 
-            # Experience
             st.divider()
-            st.markdown("<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:10px'>Work Experience</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:10px'>{d.get('experience_heading', 'Projects').title()}</div>", unsafe_allow_html=True)
             for job in d.get("experience", []):
                 st.markdown(f"<div style='font-size:13px;font-weight:700;color:#fff;margin-bottom:2px;margin-top:12px'>{job.get('title','')} &nbsp;|&nbsp; <span style='color:#F59E0B'>{job.get('company','')}</span></div>", unsafe_allow_html=True)
-                st.markdown(f"<div style='font-size:11px;color:#666;margin-bottom:6px'>{job.get('dates','')}</div>", unsafe_allow_html=True)
+                if job.get('dates'):
+                    st.markdown(f"<div style='font-size:11px;color:#666;margin-bottom:6px'>{job.get('dates','')}</div>", unsafe_allow_html=True)
                 for b in job.get("bullets", []):
                     st.markdown(f"<div style='font-size:12px;color:#aaa;line-height:1.6;padding-left:14px;margin-bottom:3px'>▸ &nbsp;{b}</div>", unsafe_allow_html=True)
 
-            # Skills
             if d.get("skills"):
                 st.divider()
                 st.markdown("<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px'>Technical Skills</div>", unsafe_allow_html=True)
                 for s in d["skills"]:
                     st.markdown(f"<div style='font-size:12px;color:#aaa;margin-bottom:4px'><span style='color:#fff;font-weight:700'>{s['label']}</span> &nbsp; {s['value']}</div>", unsafe_allow_html=True)
 
-            # Achievements
-            if d.get("achievements"):
-                st.divider()
-                st.markdown("<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px'>Key Achievements</div>", unsafe_allow_html=True)
-                for a in d["achievements"]:
-                    st.markdown(f"<div style='font-size:12px;color:#aaa;line-height:1.6;padding-left:14px;margin-bottom:3px'>▸ &nbsp;{a}</div>", unsafe_allow_html=True)
-
-            # Education
             st.divider()
             st.markdown("<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px'>Education</div>", unsafe_allow_html=True)
             st.markdown(f"<div style='font-size:12px;color:#aaa'>{d.get('education','')}</div>", unsafe_allow_html=True)
 
-            # Certifications
             if d.get("certifications"):
                 st.divider()
-                st.markdown("<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px'>Certifications & Languages</div>", unsafe_allow_html=True)
+                st.markdown("<div style='font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px'>Certifications</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='font-size:12px;color:#aaa'>{d.get('certifications','')}</div>", unsafe_allow_html=True)
