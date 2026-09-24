@@ -449,6 +449,18 @@ button[aria-label="Hide password"] { display: none !important; }
     div[data-testid="stColumns"] > div { width: 100% !important; min-width: 100% !important; }
 }
 
+/* ── MID-RANGE (between mobile-stack and full desktop) ──
+   Narrow laptop windows/tablets sit in this gap: wide enough that columns
+   stay side-by-side, but too narrow for full button labels. Shrink text
+   and padding here instead of truncating. */
+@media (min-width: 769px) and (max-width: 1100px) {
+    .stButton > button {
+        font-size: 10px !important;
+        padding: 11px 10px !important;
+        letter-spacing: 0.03em !important;
+    }
+}
+
 /* ── UPLOAD — remove inner dark box, fill card width ── */
 [data-testid="stFileUploader"] { width: 100% !important; }
 [data-testid="stFileUploaderDropzone"] {
@@ -610,7 +622,9 @@ div[data-testid="stRadio"] [data-testid="stMarkdownContainer"] p { font-size: 11
 }
 .stButton > button p, .stButton > button div, .stButton > button span {
     text-align: center !important; width: auto !important;
+    overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important;
 }
+.stButton > button { overflow: hidden !important; min-width: 0 !important; }
 .stButton > button:hover { opacity: 0.88 !important; }
 .stButton > button:disabled { background: #7a5200 !important; color: #333 !important; opacity: 0.5 !important; }
 .stButton > button[kind="secondary"] { background: #F59E0B !important; color: #1a1a1a !important; border: none !important; }
@@ -1409,9 +1423,9 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 if user_is_pro:
-    user_col1, user_col2, user_col3, user_col4 = st.columns([6, 1.2, 1, 1])
+    user_col1, user_col2, user_col3, user_col4 = st.columns([5.5, 1.6, 1.1, 1.1])
     with user_col2:
-        if st.button("Manage plan", use_container_width=True, key="btn_manage_sub"):
+        if st.button("Manage", use_container_width=True, key="btn_manage_sub"):
             st.session_state.show_manage_sub = not st.session_state.show_manage_sub
             st.session_state.confirm_cancel_sub = False
             st.rerun()
