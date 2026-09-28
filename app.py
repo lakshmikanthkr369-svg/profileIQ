@@ -5,6 +5,7 @@ import pdfplumber
 import os
 import json
 import re
+import time
 import requests
 import razorpay
 from io import BytesIO
@@ -389,6 +390,159 @@ def cancel_subscription(subscription_id, user_id):
     )
     return True, None
 
+# ── Invoices: list + re-send ──
+INVOICE_FROM = os.getenv("INVOICE_FROM", "ProfileIQ <support@profileiq.co.in>")
+INVOICE_REPLY_TO = os.getenv("SUPPORT_EMAIL", "support@profileiq.co.in")
+INVOICE_RESEND_COOLDOWN_SECONDS = 60
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_IST = timezone(timedelta(hours=5, minutes=30))  # India has no DST, so a fixed offset is exact
+
+def get_resend_key():
+    try:
+        return st.secrets["RESEND_API_KEY"]
+    except Exception:
+        return os.getenv("RESEND_API_KEY", "")
+
+def fmt_inr(paise, currency="INR"):
+    sym = "₹" if (currency or "INR") == "INR" else f"{currency} "
+    return f"{sym}{(paise or 0) / 100:,.2f}"
+
+def fmt_invoice_date(iso):
+    try:
+        return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).astimezone(_IST).strftime("%d %b %Y")
+    except Exception:
+        return str(iso or "")[:10]
+
+def invoice_method_label(m):
+    names = {"upi": "UPI Autopay", "card": "Card", "netbanking": "Net banking", "wallet": "Wallet", "emandate": "e-Mandate"}
+    return names.get(m or "", (m or "Online payment").upper() if m else "Online payment")
+
+def sb_list_invoices(user_id, limit=12):
+    """Newest first. Returns None on error (so the UI can say so) and [] when
+    there are none. ALWAYS filtered by the logged-in user's id."""
+    if not _UUID_RE.match(str(user_id or "")):
+        return None
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/invoices?user_id=eq.{user_id}"
+            "&select=id,invoice_number,issued_at,amount_paise,currency,payment_method,emailed_at,last_resent_at,resend_count"
+            f"&order=id.desc&limit={limit + 1}",
+            headers=sb_headers(), timeout=15)
+        if r.status_code != 200:
+            print(f"[invoices] list failed {r.status_code}: {r.text[:200]}")
+            return None
+        return r.json()
+    except Exception as e:
+        print(f"[invoices] list error: {e}")
+        return None
+
+def resend_invoice_email(user_id, invoice_id, fallback_email=""):
+    """Re-sends the stored invoice to the customer's OWN address (never one
+    supplied by the browser). Returns (ok, message)."""
+    if not _UUID_RE.match(str(user_id or "")) or not str(invoice_id).isdigit():
+        return False, "Invoice not found."
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/invoices?id=eq.{int(invoice_id)}&user_id=eq.{user_id}"
+            "&select=id,invoice_number,customer_email,razorpay_payment_id,html_body,text_body,emailed_at,last_resent_at,resend_count&limit=1",
+            headers=sb_headers(), timeout=15)
+        rows = r.json() if r.status_code == 200 else None
+        if rows is None:
+            print(f"[invoices] load failed {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        print(f"[invoices] load error: {e}")
+        rows = None
+    if rows is None:
+        return False, "We couldn't load that invoice right now. Please try again shortly."
+    if not rows:
+        return False, "Invoice not found."
+    inv = rows[0]
+    if not inv.get("html_body"):
+        return False, "This invoice was created before re-sending was available. Please write to support@profileiq.co.in and we'll send it to you."
+
+    last = inv.get("last_resent_at") or inv.get("emailed_at")
+    if last:
+        try:
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(str(last).replace("Z", "+00:00"))).total_seconds()
+            if age < INVOICE_RESEND_COOLDOWN_SECONDS:
+                return False, "This invoice was emailed less than a minute ago — please check your inbox (and spam folder), or try again shortly."
+        except Exception:
+            pass
+
+    key = get_resend_key()
+    if not key:
+        print("[invoices] RESEND_API_KEY is not set - cannot re-send invoice")
+        return False, "Email isn't available right now. Please write to support@profileiq.co.in."
+    to_addr = inv.get("customer_email") or fallback_email
+    if not to_addr:
+        return False, "We don't have an email address on file for this invoice. Please write to support@profileiq.co.in."
+
+    payload = {"from": INVOICE_FROM, "to": [to_addr], "reply_to": INVOICE_REPLY_TO,
+               "subject": f"Your ProfileIQ invoice {inv['invoice_number']} (copy)", "html": inv["html_body"]}
+    if inv.get("text_body"):
+        payload["text"] = inv["text_body"]
+    try:
+        resp = requests.post("https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+                     # a new key each minute: Resend caches responses per key, so a fixed one would
+                     # silently swallow every later re-send
+                     "Idempotency-Key": f"invoice-{inv['razorpay_payment_id']}-resend-{int(time.time() // 60)}"},
+            json=payload, timeout=20)
+    except Exception as e:
+        print(f"[invoices] resend error: {e}")
+        return False, "We couldn't send the email right now. Please try again shortly."
+    if resp.status_code not in (200, 201):
+        print(f"[invoices] Resend rejected {resp.status_code}: {resp.text[:300]}")
+        return False, "We couldn't send the email right now. Please try again shortly."
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    patch = {"last_resent_at": now_iso, "resend_count": int(inv.get("resend_count") or 0) + 1}
+    if not inv.get("emailed_at"):
+        patch["emailed_at"] = now_iso
+    try:
+        requests.patch(f"{SUPABASE_URL}/rest/v1/invoices?id=eq.{int(invoice_id)}&user_id=eq.{user_id}",
+            headers={**sb_headers(), "Prefer": "return=minimal"}, json=patch, timeout=15)
+    except Exception as e:
+        print(f"[invoices] could not record re-send: {e}")
+    return True, f"Invoice {inv['invoice_number']} sent to {to_addr}. It can take a minute to arrive — check spam if you don't see it."
+
+def render_invoices_panel(user_id, fallback_email):
+    from html import escape as _e
+    st.markdown("<div style='font-size:11px;font-weight:700;color:#888;letter-spacing:0.12em;margin:18px 0 6px'>🧾 INVOICES</div>", unsafe_allow_html=True)
+    cache = st.session_state.get("invoices_cache")
+    if not cache or cache.get("uid") != user_id or time.time() - cache.get("ts", 0) > 60:
+        with st.spinner("Loading invoices..."):
+            rows = sb_list_invoices(user_id)
+        cache = {"uid": user_id, "ts": time.time(), "rows": rows}
+        st.session_state.invoices_cache = cache
+    rows = cache["rows"]
+    if rows is None:
+        st.markdown('<div class="auth-error">⚠️ We couldn\'t load your invoices right now. Please try again in a moment.</div>', unsafe_allow_html=True)
+        return
+    if not rows:
+        st.markdown("<div style='color:#888;font-size:13px'>No invoices yet — your first invoice appears here right after your first payment.</div>", unsafe_allow_html=True)
+        return
+    flash = st.empty()
+    for inv in rows[:12]:
+        c1, c2 = st.columns([4.2, 1.8])
+        sent = bool(inv.get("emailed_at"))
+        with c1:
+            status = '<span style="color:#4ade80">Emailed ✓</span>' if sent else '<span style="color:#F59E0B">Email not sent yet</span>'
+            st.markdown(
+                f'<div style="padding:4px 0;line-height:1.55"><b style="color:#fff">{_e(str(inv.get("invoice_number", "")))}</b>'
+                f'<span style="color:#888;font-size:12px"> · {_e(fmt_invoice_date(inv.get("issued_at")))}'
+                f' · {_e(fmt_inr(inv.get("amount_paise"), inv.get("currency")))}'
+                f' · {_e(invoice_method_label(inv.get("payment_method")))}</span>'
+                f'<br><span style="font-size:11px">{status}</span></div>', unsafe_allow_html=True)
+        with c2:
+            if st.button("Email me" if sent else "Send to my email", use_container_width=True, key=f"inv_resend_{inv['id']}"):
+                with st.spinner("Sending..."):
+                    ok, msg = resend_invoice_email(user_id, inv["id"], fallback_email)
+                st.session_state.invoices_cache = None
+                flash.markdown(f'<div class="{"auth-success" if ok else "auth-error"}">{"✓ " if ok else "⚠️ "}{_e(msg)}</div>', unsafe_allow_html=True)
+    if len(rows) > 12:
+        st.caption("Showing your latest 12 invoices.")
+
 def is_pro(profile):
     if not profile: return False
     if profile.get("plan") != "pro": return False
@@ -692,6 +846,8 @@ div[data-testid="stRadio"] [data-testid="stMarkdownContainer"] p { font-size: 11
 .preview-comp-row b { color: #fff; }
 
 /* ── BADGES ── */
+.auth-error { background: #2a1010; border: 1px solid #5a2020; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #f87171; margin-bottom: 12px; }
+.auth-success { background: #0a2a1a; border: 1px solid #1a5a30; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #4ade80; margin-bottom: 12px; }
 .warn-badge { background: #2a1010; border: 1px solid #5a2020; border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #f87171; margin-bottom: 14px; font-weight: 500; }
 .info-badge  { background: #2a2010; border: 1px solid #5a4a10; border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #fbbf24; margin-bottom: 14px; font-weight: 500; }
 .stSpinner > div { border-top-color: #F59E0B !important; }
@@ -728,6 +884,70 @@ div[data-testid="stRadio"] [data-testid="stMarkdownContainer"] p { font-size: 11
 # ── HELPERS ──
 def get_file_id(f): return f"{f.name}_{f.size}" if f else None
 
+# Model can be switched from Railway (Variables → CLAUDE_MODEL) without a code change,
+# e.g. if a model is ever retired.
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
+
+def create_json_message(client, **kw):
+    """messages.create that never silently returns a half-written JSON answer:
+    if the reply was cut off by the token limit, retry once with more room."""
+    msg = client.messages.create(**kw)
+    if getattr(msg, "stop_reason", None) == "max_tokens":
+        bigger = dict(kw, max_tokens=min(int(kw.get("max_tokens", 4096)) * 2, 16000))
+        print(f"[ai] answer hit max_tokens={kw.get('max_tokens')} - retrying with {bigger['max_tokens']}")
+        msg = client.messages.create(**bigger)
+        if getattr(msg, "stop_reason", None) == "max_tokens":
+            raise ValueError("ANSWER_TOO_LONG")
+    return msg
+
+def describe_ai_error(e):
+    """Turns any failure into (friendly message, short reference) for the customer,
+    and writes the full detail + traceback to the server log (Railway logs)."""
+    import traceback
+    name = type(e).__name__
+    status = getattr(e, "status_code", None)
+    text = str(e)
+    low = text.lower()
+    print(f"[ai-error] {name} status={status}: {text[:500]}")
+    traceback.print_exc()
+    busy = "Our AI service is busy right now — please wait a minute and try again."
+    generic = "Something went wrong while generating your result. Please try again."
+    if isinstance(e, ValueError) and text == "EMPTY_RESUME":
+        msg = ("We couldn't read any text from your resume. If it's a scanned image, please upload a "
+               "text-based PDF or a Word (.docx) file instead.")
+    elif name in ("PackageNotFoundError", "BadZipFile") or "package not found" in low or "not a zip file" in low:
+        msg = "We couldn't open that file. Old Word (.doc) files aren't supported — please save it as .docx or PDF and upload again."
+    elif "credit balance" in low or "billing" in low or "purchase credits" in low:
+        print("[ai-error] *** The Anthropic account is out of credit / billing problem - top up at console.anthropic.com ***")
+        msg = "Our AI service is temporarily unavailable. Please try again a little later."
+    elif "could not resolve authentication" in low or status in (401, 403):
+        print("[ai-error] *** ANTHROPIC_API_KEY is missing, wrong or not allowed - check the Railway variable ***")
+        msg = "Our AI service is temporarily unavailable. Please try again a little later."
+    elif status == 404 or ("model" in low and "not found" in low):
+        print(f"[ai-error] *** Model '{CLAUDE_MODEL}' was not found - set CLAUDE_MODEL in Railway to a current model id ***")
+        msg = "Our AI service is temporarily unavailable. Please try again a little later."
+    elif status == 429 or "rate" in name.lower() and "limit" in name.lower() or "overloaded" in low or status in (500, 502, 503, 504, 529):
+        msg = busy
+    elif "timeout" in name.lower() or "timed out" in low:
+        msg = "The AI took too long to respond. Please try again."
+    elif "APIConnection" in name:
+        msg = "We couldn't reach our AI service. Please try again in a moment."
+    elif (isinstance(e, ValueError) and text in ("ANSWER_TOO_LONG", "No JSON found")) or "JSONDecodeError" in name:
+        msg = "The AI's answer came back incomplete. Please try again."
+    else:
+        msg = generic
+    ref = name + (f" {status}" if status else "")
+    return {"message": msg, "ref": ref}
+
+def show_ai_error(ctx):
+    """Shows the last AI failure for this screen. It lives in session state so it
+    survives the page refresh that follows a failed action (it used to vanish)."""
+    err = st.session_state.get("ai_error")
+    if err and err.get("ctx") == ctx:
+        from html import escape as _e
+        st.markdown(f'<div class="auth-error">⚠️ {_e(err["message"])}'
+                    f'<br><span style="font-size:11px;opacity:.7">Reference: {_e(err["ref"])}</span></div>', unsafe_allow_html=True)
+
 def extract_text(file):
     name = file.name.lower()
     if name.endswith(".pdf"):
@@ -741,7 +961,7 @@ def extract_text(file):
 def score_resume(resume_text, jd):
     """ATS scoring that mirrors how real recruiters and ATS tools score resumes"""
     client = anthropic.Anthropic(api_key=API_KEY)
-    msg = client.messages.create(model="claude-sonnet-4-6", max_tokens=1500,
+    msg = client.messages.create(model=CLAUDE_MODEL, max_tokens=1500,
         messages=[{"role":"user","content":f"""You are an ATS (Applicant Tracking System) scoring expert.
 
 Score this resume against the job description the way real ATS tools do:
@@ -817,7 +1037,7 @@ Focus suggestions on:
 4. Core skills gaps that need to be addressed
 5. Recommend using the AI Rewrite feature"""
 
-    msg = client.messages.create(model="claude-sonnet-4-6", max_tokens=1000,
+    msg = client.messages.create(model=CLAUDE_MODEL, max_tokens=1000,
         messages=[{"role":"user","content":f"""{context}
 
 Give exactly 5 specific, actionable suggestions.
@@ -839,8 +1059,8 @@ Job Description: {jd}"""}])
     return sugs
 
 def do_rewrite(resume_text, jd):
-    client = anthropic.Anthropic(api_key=API_KEY)
-    msg = client.messages.create(model="claude-sonnet-4-6", max_tokens=4096,
+    client = anthropic.Anthropic(api_key=API_KEY, timeout=300.0)
+    msg = create_json_message(client, model=CLAUDE_MODEL, max_tokens=8192,
         messages=[{"role":"user","content":f"""You are an expert ATS resume optimizer. Your ONLY goal is to maximize the ATS keyword match score between this resume and the job description.
 
 STEP 1 — Extract ALL important keywords from the Job Description:
@@ -908,7 +1128,7 @@ def build_fresher_resume(profile_data, jd):
     the preview all work unchanged. Academic projects are mapped into the
     'experience' list but the section is labeled PROJECTS, not WORK
     EXPERIENCE, to stay honest on the actual resume."""
-    client = anthropic.Anthropic(api_key=API_KEY)
+    client = anthropic.Anthropic(api_key=API_KEY, timeout=300.0)
 
     projects_text = "\n".join(
         f"- {p.get('name','')}: {p.get('description','')}"
@@ -918,7 +1138,7 @@ def build_fresher_resume(profile_data, jd):
         c.get("name", "") for c in profile_data.get("certifications", []) if c.get("name")
     ) or "None"
 
-    msg = client.messages.create(model="claude-sonnet-4-6", max_tokens=4096,
+    msg = create_json_message(client, model=CLAUDE_MODEL, max_tokens=8192,
         messages=[{"role": "user", "content": f"""You are an expert resume writer helping a FRESHER (no prior work experience — a student/recent graduate) build their first resume, tailored to a specific job description, optimized for ATS keyword matching.
 
 STEP 1 — Extract important keywords from the Job Description (skills, tools, technologies, frameworks, domain terms).
@@ -1630,10 +1850,11 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-if user_is_pro:
+has_billing = user_is_pro or bool((profile or {}).get("razorpay_subscription_id"))
+if has_billing:
     user_col1, user_col2, user_col3, user_col4 = st.columns([5.5, 1.6, 1.1, 1.1])
     with user_col2:
-        if st.button("Manage", use_container_width=True, key="btn_manage_sub"):
+        if st.button("Manage" if user_is_pro else "Billing", use_container_width=True, key="btn_manage_sub"):
             st.session_state.show_manage_sub = not st.session_state.show_manage_sub
             st.session_state.confirm_cancel_sub = False
             st.rerun()
@@ -1654,40 +1875,44 @@ else:
         if st.button("Sign out", use_container_width=True, key="btn_logout"):
             logout()
 
-if st.session_state.show_manage_sub and user_is_pro:
+if st.session_state.show_manage_sub and has_billing:
     st.markdown("---")
-    st.markdown("##### 📋 Manage Subscription")
-    sub_status = profile.get("subscription_status", "active")
-    expires_raw = profile.get("pro_expires_at")
-    expires_display = expires_raw[:10] if expires_raw else "—"
-    if sub_status == "cancel_at_cycle_end":
-        st.markdown(f'<div class="auth-error">Your subscription is set to cancel. You\'ll keep Pro access until <b>{expires_display}</b>, then it won\'t renew.</div>', unsafe_allow_html=True)
-    else:
-        st.markdown(f'<div style="color:#888;font-size:13px;margin-bottom:12px">Next billing date: <b style="color:#fff">{expires_display}</b> · ₹199/month via UPI Autopay</div>', unsafe_allow_html=True)
-        if not st.session_state.confirm_cancel_sub:
-            if st.button("Cancel subscription", use_container_width=True, key="btn_cancel_sub_start"):
-                st.session_state.confirm_cancel_sub = True
-                st.rerun()
+    st.markdown("##### 📋 Manage Subscription" if user_is_pro else "##### 🧾 Billing")
+    if user_is_pro:
+        sub_status = profile.get("subscription_status", "active")
+        expires_raw = profile.get("pro_expires_at")
+        expires_display = expires_raw[:10] if expires_raw else "—"
+        if sub_status == "cancel_at_cycle_end":
+            st.markdown(f'<div class="auth-error">Your subscription is set to cancel. You\'ll keep Pro access until <b>{expires_display}</b>, then it won\'t renew.</div>', unsafe_allow_html=True)
         else:
-            st.markdown(f'<div class="auth-error">⚠️ You\'ll keep Pro access until <b>{expires_display}</b>, then it won\'t renew. This can\'t be undone from here.</div>', unsafe_allow_html=True)
-            cc1, cc2 = st.columns(2)
-            with cc1:
-                if st.button("Yes, cancel", type="primary", use_container_width=True, key="btn_cancel_sub_confirm"):
-                    with st.spinner("Cancelling..."):
-                        ok, err = cancel_subscription(profile.get("razorpay_subscription_id"), st.session_state.user["id"])
-                    if ok:
-                        fresh_profile = sb_get_profile(st.session_state.access_token, st.session_state.user["id"])
-                        if fresh_profile:
-                            st.session_state.profile = fresh_profile
-                        st.session_state.confirm_cancel_sub = False
-                        st.success("✓ Subscription cancelled — Pro access continues until your current period ends.")
-                        st.rerun()
-                    else:
-                        st.markdown(f'<div class="auth-error">⚠️ {err}</div>', unsafe_allow_html=True)
-            with cc2:
-                if st.button("Never mind", use_container_width=True, key="btn_cancel_sub_back"):
-                    st.session_state.confirm_cancel_sub = False
+            st.markdown(f'<div style="color:#888;font-size:13px;margin-bottom:12px">Next billing date: <b style="color:#fff">{expires_display}</b> · ₹199/month via UPI Autopay</div>', unsafe_allow_html=True)
+            if not st.session_state.confirm_cancel_sub:
+                if st.button("Cancel subscription", use_container_width=True, key="btn_cancel_sub_start"):
+                    st.session_state.confirm_cancel_sub = True
                     st.rerun()
+            else:
+                st.markdown(f'<div class="auth-error">⚠️ You\'ll keep Pro access until <b>{expires_display}</b>, then it won\'t renew. This can\'t be undone from here.</div>', unsafe_allow_html=True)
+                cc1, cc2 = st.columns(2)
+                with cc1:
+                    if st.button("Yes, cancel", type="primary", use_container_width=True, key="btn_cancel_sub_confirm"):
+                        with st.spinner("Cancelling..."):
+                            ok, err = cancel_subscription(profile.get("razorpay_subscription_id"), st.session_state.user["id"])
+                        if ok:
+                            fresh_profile = sb_get_profile(st.session_state.access_token, st.session_state.user["id"])
+                            if fresh_profile:
+                                st.session_state.profile = fresh_profile
+                            st.session_state.confirm_cancel_sub = False
+                            st.success("✓ Subscription cancelled — Pro access continues until your current period ends.")
+                            st.rerun()
+                        else:
+                            st.markdown(f'<div class="auth-error">⚠️ {err}</div>', unsafe_allow_html=True)
+                with cc2:
+                    if st.button("Never mind", use_container_width=True, key="btn_cancel_sub_back"):
+                        st.session_state.confirm_cancel_sub = False
+                        st.rerun()
+    else:
+        st.markdown("<div style=\"color:#888;font-size:13px;margin-bottom:8px\">Your Pro plan isn't active right now. Your past invoices are below.</div>", unsafe_allow_html=True)
+    render_invoices_panel(st.session_state.user["id"], user_email)
     st.markdown("---")
 
 if st.session_state.show_support:
@@ -1950,6 +2175,7 @@ if not st.session_state.is_fresher_mode:
     # SCORE TAB
     # ════════════════════════
     if tab_choice == "📊  Score my resume":
+        show_ai_error("analyze")
         c1, c2 = st.columns([5,1], gap="small")
         with c1:
             if not user_is_pro and scans_left <= 0:
@@ -1979,6 +2205,7 @@ if not st.session_state.is_fresher_mode:
                     st.markdown('<div class="info-badge">ℹ️ Already analyzed this combination. Change the resume or JD to analyze again.</div>', unsafe_allow_html=True)
                 else:
                     st.session_state.processing = True
+                    st.session_state.ai_error = None
                     with st.spinner("Analyzing your resume against the job description..."):
                         try:
                             # Check scan limit for free users
@@ -1986,6 +2213,8 @@ if not st.session_state.is_fresher_mode:
                                 st.markdown('<div class="warn-badge">You have used all 3 free scans this month. Upgrade to Pro for unlimited scans.</div>', unsafe_allow_html=True)
                                 st.stop()
                             rt = extract_text(resume_file)
+                            if not (rt or "").strip():
+                                raise ValueError("EMPTY_RESUME")
                             scored = score_resume(rt, jd_text)
                             sugs   = get_suggestions(rt, jd_text, scored["score"], scored["missing"])
                             scored["suggestions"] = sugs
@@ -2000,7 +2229,7 @@ if not st.session_state.is_fresher_mode:
                                 if st.session_state.profile:
                                     st.session_state.profile["scans_used"] = current_used + 1
                         except Exception as e:
-                            st.error(f"⚠️ Error: {str(e)[:200]}")
+                            st.session_state.ai_error = {"ctx": "analyze", **describe_ai_error(e)}
                         finally:
                             st.session_state.processing = False
                     st.rerun()
@@ -2061,6 +2290,7 @@ if not st.session_state.is_fresher_mode:
             render_upgrade_cta("rewritetab")
             st.stop()
 
+        show_ai_error("rewrite")
         c3, c4 = st.columns([5,1], gap="small")
         with c3:
             rewrite_clicked = st.button("Rewrite with AI ->", type="primary",
@@ -2085,9 +2315,12 @@ if not st.session_state.is_fresher_mode:
                     st.markdown('<div class="info-badge">ℹ️ Already rewritten. Change resume or JD to rewrite again.</div>', unsafe_allow_html=True)
                 else:
                     st.session_state.processing = True
+                    st.session_state.ai_error = None
                     with st.spinner("✨ Rewriting your resume and scoring the result..."):
                         try:
                             rt = extract_text(resume_file)
+                            if not (rt or "").strip():
+                                raise ValueError("EMPTY_RESUME")
                             # Step 1: Rewrite aggressively for ATS
                             data = do_rewrite(rt, jd_text)
                             # Step 2: Build complete text from ALL rewritten fields for scoring
@@ -2121,7 +2354,7 @@ if not st.session_state.is_fresher_mode:
                             st.session_state.last_rewritten_file = get_file_id(resume_file)
                             st.session_state.last_rewritten_jd = jd_text.strip()
                         except Exception as e:
-                            st.error(f"⚠️ Rewrite failed: {str(e)[:300]}. Please try again.")
+                            st.session_state.ai_error = {"ctx": "rewrite", **describe_ai_error(e)}
                         finally:
                             st.session_state.processing = False
                     st.rerun()
@@ -2203,6 +2436,7 @@ else:
         render_upgrade_cta("freshertab")
         st.stop()
 
+    show_ai_error("fresher")
     build_clicked = st.button("Build My Resume ->", type="primary",
         use_container_width=True, key="btn_build_fresher",
         disabled=st.session_state.processing)
@@ -2232,6 +2466,7 @@ else:
             st.markdown(f'<div class="auth-error">⚠️ Please fill in: {", ".join(missing_fields)}</div>', unsafe_allow_html=True)
         else:
             st.session_state.processing = True
+            st.session_state.ai_error = None
             with st.spinner("✨ Building your resume and scoring it against the job description..."):
                 try:
                     data = build_fresher_resume(fresher_data, jd_text)
@@ -2261,7 +2496,7 @@ else:
                     # Save fresher data for next time
                     sb_save_fresher_profile(st.session_state.access_token, st.session_state.user["id"], fresher_data)
                 except Exception as e:
-                    st.error(f"⚠️ Build failed: {str(e)[:300]}. Please try again.")
+                    st.session_state.ai_error = {"ctx": "fresher", **describe_ai_error(e)}
                 finally:
                     st.session_state.processing = False
             st.rerun()
