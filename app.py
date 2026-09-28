@@ -417,24 +417,45 @@ def invoice_method_label(m):
     names = {"upi": "UPI Autopay", "card": "Card", "netbanking": "Net banking", "wallet": "Wallet", "emandate": "e-Mandate"}
     return names.get(m or "", (m or "Online payment").upper() if m else "Online payment")
 
-def sb_list_invoices(user_id, limit=12):
-    """Newest first. Returns None on error (so the UI can say so) and [] when
-    there are none. ALWAYS filtered by the logged-in user's id."""
+def _pg_error_ref(resp):
+    """Short, safe reference for a failed Supabase call: HTTP status + PostgREST code."""
+    code = ""
+    try:
+        code = (resp.json() or {}).get("code") or ""
+    except Exception:
+        pass
+    return f"HTTP {resp.status_code}" + (f" {code}" if code else "")
+
+def sb_list_invoices_ex(user_id, limit=12):
+    """Newest first. Returns (rows, error_ref): rows is None on error (so the UI
+    can say so) and [] when there are none. ALWAYS filtered by the logged-in
+    user's id. Only asks for columns from migration 03, so listing works even
+    before migration 04 has been run."""
     if not _UUID_RE.match(str(user_id or "")):
-        return None
+        return None, "bad-user-id"
     try:
         r = requests.get(
             f"{SUPABASE_URL}/rest/v1/invoices?user_id=eq.{user_id}"
-            "&select=id,invoice_number,issued_at,amount_paise,currency,payment_method,emailed_at,last_resent_at,resend_count"
+            "&select=id,invoice_number,issued_at,amount_paise,currency,payment_method,emailed_at"
             f"&order=id.desc&limit={limit + 1}",
             headers=sb_headers(), timeout=15)
         if r.status_code != 200:
-            print(f"[invoices] list failed {r.status_code}: {r.text[:200]}")
-            return None
-        return r.json()
+            ref = _pg_error_ref(r)
+            print(f"[invoices] list failed {ref}: {r.text[:300]}")
+            if "PGRST205" in ref or "42P01" in ref:
+                print("[invoices] *** the invoices table is missing - run 03_invoices_and_phone_migration.sql in Supabase ***")
+            elif "42703" in ref:
+                print("[invoices] *** a column is missing - run the 03 and 04 migrations in Supabase ***")
+            elif r.status_code in (401, 403):
+                print("[invoices] *** SUPABASE_KEY was not accepted - check the Railway variable ***")
+            return None, ref
+        return r.json(), None
     except Exception as e:
         print(f"[invoices] list error: {e}")
-        return None
+        return None, type(e).__name__
+
+def sb_list_invoices(user_id, limit=12):
+    return sb_list_invoices_ex(user_id, limit)[0]
 
 def resend_invoice_email(user_id, invoice_id, fallback_email=""):
     """Re-sends the stored invoice to the customer's OWN address (never one
@@ -512,12 +533,13 @@ def render_invoices_panel(user_id, fallback_email):
     cache = st.session_state.get("invoices_cache")
     if not cache or cache.get("uid") != user_id or time.time() - cache.get("ts", 0) > 60:
         with st.spinner("Loading invoices..."):
-            rows = sb_list_invoices(user_id)
-        cache = {"uid": user_id, "ts": time.time(), "rows": rows}
+            rows, err_ref = sb_list_invoices_ex(user_id)
+        cache = {"uid": user_id, "ts": time.time(), "rows": rows, "ref": err_ref}
         st.session_state.invoices_cache = cache
     rows = cache["rows"]
     if rows is None:
-        st.markdown('<div class="auth-error">⚠️ We couldn\'t load your invoices right now. Please try again in a moment.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="auth-error">⚠️ We couldn\'t load your invoices right now. Please try again in a moment.'
+                    f'<br><span style="font-size:11px;opacity:.7">Reference: {_e(str(cache.get("ref") or "unknown"))}</span></div>', unsafe_allow_html=True)
         return
     if not rows:
         st.markdown("<div style='color:#888;font-size:13px'>No invoices yet — your first invoice appears here right after your first payment.</div>", unsafe_allow_html=True)
