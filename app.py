@@ -404,8 +404,7 @@ def get_resend_key():
         return os.getenv("RESEND_API_KEY", "")
 
 def fmt_inr(paise, currency="INR"):
-    sym = "₹" if (currency or "INR") == "INR" else f"{currency} "
-    return f"{sym}{(paise or 0) / 100:,.2f}"
+    return fmt_money_in(paise, currency)
 
 def fmt_invoice_date(iso):
     try:
@@ -457,6 +456,187 @@ def sb_list_invoices_ex(user_id, limit=12):
 def sb_list_invoices(user_id, limit=12):
     return sb_list_invoices_ex(user_id, limit)[0]
 
+# ── Invoice document (Python twin of renderInvoiceHtml/Text in the webhook) ──
+# Used to rebuild an invoice that has no saved copy (e.g. created before saved
+# copies existed). Kept byte-identical to the webhook's output - see tests.
+BUSINESS_NAME = os.getenv("BUSINESS_NAME", "ProfileIQ")
+BUSINESS_ADDRESS = os.getenv("BUSINESS_ADDRESS", "").replace("\\n", "\n")
+INVOICE_TAX_NOTE = os.getenv("INVOICE_TAX_NOTE", "GST not applicable - supplier is not registered under GST.")
+INVOICE_APP_URL = os.getenv("APP_URL", "https://app.profileiq.co.in")
+_EN_IN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sept", "Oct", "Nov", "Dec"]
+
+def _inv_esc(v):
+    return (str("" if v is None else v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace('"', "&quot;").replace("'", "&#39;"))
+
+def _indian_group(whole):
+    s = str(int(whole))
+    if len(s) <= 3:
+        return s
+    head, tail = s[:-3], s[-3:]
+    parts = []
+    while len(head) > 2:
+        parts.insert(0, head[-2:]); head = head[:-2]
+    if head:
+        parts.insert(0, head)
+    return ",".join(parts + [tail])
+
+def fmt_money_in(paise, currency="INR"):
+    paise = int(paise or 0)
+    sym = "₹" if (currency or "INR") == "INR" else f"{currency} "
+    return f"{sym}{_indian_group(paise // 100)}.{paise % 100:02d}"
+
+def fmt_date_in(iso):
+    if not iso:
+        return "-"
+    try:
+        d = datetime.fromisoformat(str(iso).replace("Z", "+00:00")).astimezone(_IST)
+        return f"{d.day:02d} {_EN_IN_MONTHS[d.month - 1]} {d.year}"
+    except Exception:
+        return "-"
+
+_INVOICE_HTML_TEMPLATE = """<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f4f5;padding:24px 12px">
+<tr><td align="center">
+<table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb">
+
+  <tr><td style="background:#1a1a1a;padding:22px 28px">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>
+      <td style="font-size:22px;font-weight:900;color:#ffffff;letter-spacing:-0.5px">@@b_name@@</td>
+      <td align="right" style="font-size:12px;font-weight:700;color:#F59E0B;letter-spacing:0.12em">INVOICE / RECEIPT</td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="height:4px;background:#F59E0B;line-height:4px;font-size:4px">&nbsp;</td></tr>
+
+  <tr><td style="padding:28px 28px 8px">
+    <div style="font-size:18px;font-weight:700;color:#111827">Thank you for your payment, @@c_name_there@@!</div>
+    <div style="font-size:13px;color:#6b7280;margin-top:6px">Here is your invoice for your @@b_name@@ Pro subscription.</div>
+  </td></tr>
+
+  <tr><td style="padding:16px 28px">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size:13px;color:#374151">
+      <tr>
+        <td style="padding:4px 0;color:#6b7280">Invoice number</td>
+        <td align="right" style="padding:4px 0;font-weight:700;color:#111827">@@inv_no@@</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 0;color:#6b7280">Invoice date</td>
+        <td align="right" style="padding:4px 0">@@issued@@</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 0;color:#6b7280">Payment method</td>
+        <td align="right" style="padding:4px 0">@@method@@</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 0;color:#6b7280">Payment ID</td>
+        <td align="right" style="padding:4px 0;font-family:monospace;font-size:12px">@@pay_id@@</td>
+      </tr>
+    </table>
+  </td></tr>
+
+  <tr><td style="padding:8px 28px 16px">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+      <tr>
+        <td width="50%" valign="top" style="padding-right:12px">
+          <div style="font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:0.1em;margin-bottom:6px">BILLED TO</div>
+          <div style="font-size:14px;font-weight:700;color:#111827">@@c_name@@</div>
+          <div style="font-size:13px;color:#374151">@@c_email@@</div>
+          @@phone_row@@
+        </td>
+        <td width="50%" valign="top" style="padding-left:12px">
+          <div style="font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:0.1em;margin-bottom:6px">FROM</div>
+          <div style="font-size:14px;font-weight:700;color:#111827">@@b_name@@</div>
+          <div style="font-size:13px;color:#374151">@@support@@</div>
+          @@address@@
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+
+  <tr><td style="padding:0 28px">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      <tr style="background:#f9fafb">
+        <td style="padding:10px 14px;font-size:11px;font-weight:700;color:#6b7280;letter-spacing:0.08em">DESCRIPTION</td>
+        <td align="right" style="padding:10px 14px;font-size:11px;font-weight:700;color:#6b7280;letter-spacing:0.08em">AMOUNT</td>
+      </tr>
+      <tr>
+        <td style="padding:14px;font-size:14px;color:#111827;border-top:1px solid #e5e7eb">
+          @@desc@@
+          <div style="font-size:12px;color:#6b7280;margin-top:3px">Service period: @@period@@</div>
+        </td>
+        <td align="right" valign="top" style="padding:14px;font-size:14px;color:#111827;border-top:1px solid #e5e7eb">@@total@@</td>
+      </tr>
+      <tr style="background:#fffbeb">
+        <td style="padding:14px;font-size:14px;font-weight:700;color:#111827;border-top:1px solid #e5e7eb">Total paid <span style="display:inline-block;margin-left:8px;padding:2px 8px;background:#dcfce7;color:#166534;font-size:11px;font-weight:700;border-radius:999px">PAID</span></td>
+        <td align="right" style="padding:14px;font-size:16px;font-weight:900;color:#111827;border-top:1px solid #e5e7eb">@@total@@</td>
+      </tr>
+    </table>
+  </td></tr>
+
+  <tr><td style="padding:18px 28px 6px">
+    <div style="font-size:12px;color:#6b7280;line-height:1.6">
+      Your subscription renews automatically each month via UPI Autopay until cancelled.
+      You can cancel any time from <b>Manage</b> inside <a href="@@app_url@@" style="color:#b45309">@@app_host@@</a>
+      - you keep Pro access until the end of the period you've paid for.
+    </div>
+  </td></tr>
+
+  <tr><td style="padding:14px 28px 26px">
+    <div style="font-size:11px;color:#9ca3af;line-height:1.6;border-top:1px solid #f3f4f6;padding-top:14px">
+      @@tax_note@@<br>
+      This is a computer-generated invoice and does not require a signature.<br>
+      Questions? Reply to this email or write to <a href="mailto:@@support@@" style="color:#b45309">@@support@@</a>.
+    </div>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+
+def render_invoice_html(inv):
+    total = fmt_money_in(inv.get("amount_paise"), inv.get("currency") or "INR")
+    period = (f"{fmt_date_in(inv.get('period_start'))} – {fmt_date_in(inv.get('period_end'))}"
+              if inv.get("period_start") and inv.get("period_end") else "-")
+    address = (f'<div style="font-size:12px;color:#6b7280;line-height:1.5;margin-top:4px">{_inv_esc(BUSINESS_ADDRESS).replace(chr(10), "<br>")}</div>'
+               if BUSINESS_ADDRESS else "")
+    phone_row = (f'<div style="font-size:13px;color:#374151">{_inv_esc(inv.get("customer_phone"))}</div>'
+                 if inv.get("customer_phone") else "")
+    vals = {
+        "b_name": _inv_esc(BUSINESS_NAME), "c_name_there": _inv_esc(inv.get("customer_name") or "there"),
+        "inv_no": _inv_esc(inv.get("invoice_number")), "issued": _inv_esc(fmt_date_in(inv.get("issued_at"))),
+        "method": _inv_esc(invoice_method_label(inv.get("payment_method"))), "pay_id": _inv_esc(inv.get("razorpay_payment_id")),
+        "c_name": _inv_esc(inv.get("customer_name") or "Customer"), "c_email": _inv_esc(inv.get("customer_email") or ""),
+        "phone_row": phone_row, "support": _inv_esc(INVOICE_REPLY_TO), "address": address,
+        "desc": _inv_esc(inv.get("description") or "ProfileIQ Pro - Monthly subscription"), "period": _inv_esc(period),
+        "total": _inv_esc(total), "app_url": _inv_esc(INVOICE_APP_URL),
+        "app_host": _inv_esc(re.sub(r"^https?://", "", INVOICE_APP_URL)), "tax_note": _inv_esc(INVOICE_TAX_NOTE),
+    }
+    # one pass: substituted text is never re-scanned, so customer-supplied text can't inject a placeholder
+    return re.sub(r"@@(\w+)@@", lambda m: vals[m.group(1)], _INVOICE_HTML_TEMPLATE)
+
+def render_invoice_text(inv):
+    total = fmt_money_in(inv.get("amount_paise"), inv.get("currency") or "INR")
+    period = (f"{fmt_date_in(inv.get('period_start'))} - {fmt_date_in(inv.get('period_end'))}"
+              if inv.get("period_start") and inv.get("period_end") else "-")
+    return "\n".join([
+        f"{BUSINESS_NAME} - INVOICE / RECEIPT", "",
+        f"Invoice number : {inv.get('invoice_number')}",
+        f"Invoice date   : {fmt_date_in(inv.get('issued_at'))}",
+        f"Payment method : {invoice_method_label(inv.get('payment_method'))}",
+        f"Payment ID     : {inv.get('razorpay_payment_id')}", "",
+        f"Billed to      : {inv.get('customer_name') or 'Customer'} <{inv.get('customer_email') or ''}>",
+        f"Phone          : {inv.get('customer_phone')}" if inv.get("customer_phone") else "", "",
+        f"{inv.get('description') or 'ProfileIQ Pro - Monthly subscription'}",
+        f"Service period : {period}",
+        f"Total paid     : {total} (PAID)", "",
+        INVOICE_TAX_NOTE,
+        f"Questions? Contact {INVOICE_REPLY_TO}",
+    ])
+
 def resend_invoice_email(user_id, invoice_id, fallback_email=""):
     """Re-sends the stored invoice to the customer's OWN address (never one
     supplied by the browser). Returns (ok, message)."""
@@ -465,7 +645,8 @@ def resend_invoice_email(user_id, invoice_id, fallback_email=""):
     try:
         r = requests.get(
             f"{SUPABASE_URL}/rest/v1/invoices?id=eq.{int(invoice_id)}&user_id=eq.{user_id}"
-            "&select=id,invoice_number,customer_email,razorpay_payment_id,html_body,text_body,emailed_at,last_resent_at,resend_count&limit=1",
+            "&select=id,invoice_number,customer_name,customer_email,customer_phone,amount_paise,currency,description,period_start,period_end,"
+            "razorpay_payment_id,razorpay_subscription_id,payment_method,issued_at,html_body,text_body,emailed_at,last_resent_at,resend_count&limit=1",
             headers=sb_headers(), timeout=15)
         rows = r.json() if r.status_code == 200 else None
         if rows is None:
@@ -478,8 +659,15 @@ def resend_invoice_email(user_id, invoice_id, fallback_email=""):
     if not rows:
         return False, "Invoice not found."
     inv = rows[0]
-    if not inv.get("html_body"):
-        return False, "This invoice was created before re-sending was available. Please write to support@profileiq.co.in and we'll send it to you."
+    html_body, text_body, rebuilt = inv.get("html_body"), inv.get("text_body"), False
+    if not html_body:
+        # No saved copy (created before copies were saved): rebuild it from the invoice
+        # record - number, date, amount and customer are all stored - and save what we send.
+        try:
+            html_body, text_body, rebuilt = render_invoice_html(inv), render_invoice_text(inv), True
+        except Exception as e:
+            print(f"[invoices] could not rebuild invoice {inv.get('invoice_number')}: {e}")
+            return False, "We couldn't prepare that invoice right now. Please write to support@profileiq.co.in and we'll send it to you."
 
     last = inv.get("last_resent_at") or inv.get("emailed_at")
     if last:
@@ -499,9 +687,9 @@ def resend_invoice_email(user_id, invoice_id, fallback_email=""):
         return False, "We don't have an email address on file for this invoice. Please write to support@profileiq.co.in."
 
     payload = {"from": INVOICE_FROM, "to": [to_addr], "reply_to": INVOICE_REPLY_TO,
-               "subject": f"Your ProfileIQ invoice {inv['invoice_number']} (copy)", "html": inv["html_body"]}
-    if inv.get("text_body"):
-        payload["text"] = inv["text_body"]
+               "subject": f"Your ProfileIQ invoice {inv['invoice_number']} (copy)", "html": html_body}
+    if text_body:
+        payload["text"] = text_body
     try:
         resp = requests.post("https://api.resend.com/emails",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
@@ -520,6 +708,8 @@ def resend_invoice_email(user_id, invoice_id, fallback_email=""):
     patch = {"last_resent_at": now_iso, "resend_count": int(inv.get("resend_count") or 0) + 1}
     if not inv.get("emailed_at"):
         patch["emailed_at"] = now_iso
+    if rebuilt:
+        patch["html_body"], patch["text_body"] = html_body, text_body     # freeze what was sent
     try:
         requests.patch(f"{SUPABASE_URL}/rest/v1/invoices?id=eq.{int(invoice_id)}&user_id=eq.{user_id}",
             headers={**sb_headers(), "Prefer": "return=minimal"}, json=patch, timeout=15)
