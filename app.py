@@ -4,6 +4,7 @@ import anthropic
 import pdfplumber
 import os
 import json
+import re
 import requests
 import razorpay
 from io import BytesIO
@@ -109,6 +110,21 @@ def sb_headers(token=None, use_anon=False):
     else:
         h["Authorization"] = f"Bearer {key}"
     return h
+
+def normalize_indian_mobile(raw):
+    """Accepts 9876543210, +91 98765 43210, 91-9876543210, 09876543210 etc.
+    Returns '+91XXXXXXXXXX' if valid, else None."""
+    digits = re.sub(r"\D", "", raw or "")
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    elif len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    if len(digits) == 10 and digits[0] in "6789":
+        return "+91" + digits
+    return None
+
+def is_valid_email(e):
+    return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$", (e or "").strip()))
 
 def sb_register(email, password):
     r = requests.post(f"{SUPABASE_URL}/auth/v1/signup",
@@ -974,111 +990,201 @@ Job Description:
     data["experience"] = cleaned_exp
     return data
 
-def make_docx(data):
+# ══════════════════════════════════════
+# RESUME TEMPLATES — same data, different look. Switching format re-renders
+# instantly from the stored resume data (no extra AI call, no extra cost).
+# ══════════════════════════════════════
+RESUME_TEMPLATES = {
+    "Bold": {
+        "label": "Bold — dark header, amber accents",
+        "font_docx": "Calibri", "pdf_font": "Helvetica", "pdf_font_bold": "Helvetica-Bold",
+        "banner": True, "banner_fill": "1a1a1a",
+        "name_color": "FFFFFF", "title_color": "F59E0B", "contact_color": "BBBBBB",
+        "name_size": 20, "align": "center",
+        "text_color": "1a1a1a", "muted_color": "555555", "company_color": "2E5FA3",
+        "sec_color": "1a1a1a", "sec_rule": "F59E0B", "sec_rule_sz": 6, "sec_rule_pdf": 1.5,
+        "bullet": "▸", "bullet_color": "F59E0B",
+    },
+    "Classic": {
+        "label": "Classic — serif, traditional black & white",
+        "font_docx": "Times New Roman", "pdf_font": "Times-Roman", "pdf_font_bold": "Times-Bold",
+        "banner": False, "banner_fill": None,
+        "name_color": "000000", "title_color": "333333", "contact_color": "444444",
+        "name_size": 22, "align": "center",
+        "text_color": "000000", "muted_color": "333333", "company_color": "000000",
+        "sec_color": "000000", "sec_rule": "000000", "sec_rule_sz": 6, "sec_rule_pdf": 0.75,
+        "bullet": "•", "bullet_color": "000000",
+    },
+    "Modern": {
+        "label": "Modern — navy & blue accents, clean sans-serif",
+        "font_docx": "Calibri", "pdf_font": "Helvetica", "pdf_font_bold": "Helvetica-Bold",
+        "banner": False, "banner_fill": None,
+        "name_color": "1F3A5F", "title_color": "2E5FA3", "contact_color": "555555",
+        "name_size": 24, "align": "left",
+        "text_color": "222222", "muted_color": "555555", "company_color": "2E5FA3",
+        "sec_color": "2E5FA3", "sec_rule": "2E5FA3", "sec_rule_sz": 8, "sec_rule_pdf": 1.5,
+        "bullet": "•", "bullet_color": "2E5FA3",
+    },
+    "Minimal": {
+        "label": "Minimal ATS — plain and simple, max compatibility",
+        "font_docx": "Arial", "pdf_font": "Helvetica", "pdf_font_bold": "Helvetica-Bold",
+        "banner": False, "banner_fill": None,
+        "name_color": "000000", "title_color": "000000", "contact_color": "333333",
+        "name_size": 18, "align": "left",
+        "text_color": "000000", "muted_color": "333333", "company_color": "000000",
+        "sec_color": "000000", "sec_rule": None, "sec_rule_sz": 0, "sec_rule_pdf": 0,
+        "bullet": "•", "bullet_color": "000000",
+    },
+}
+
+def _rgb(hexstr):
+    return RGBColor(int(hexstr[0:2], 16), int(hexstr[2:4], 16), int(hexstr[4:6], 16))
+
+def make_docx(data, template="Bold"):
+    cfg = RESUME_TEMPLATES.get(template) or RESUME_TEMPLATES["Bold"]
+    F = cfg["font_docx"]
     doc = DocxDocument()
-    for sec in doc.sections:
-        sec.top_margin=Inches(0.6); sec.bottom_margin=Inches(0.6)
-        sec.left_margin=Inches(0.7); sec.right_margin=Inches(0.7)
-    DARK=RGBColor(0x1a,0x1a,0x1a); AMB=RGBColor(0xF5,0x9E,0x0B)
-    BLU=RGBColor(0x2E,0x5F,0xA3); GRY=RGBColor(0x44,0x44,0x44)
-    WHT=RGBColor(0xFF,0xFF,0xFF); LGR=RGBColor(0xBB,0xBB,0xBB)
+    for sc in doc.sections:
+        sc.top_margin = Inches(0.6); sc.bottom_margin = Inches(0.6)
+        sc.left_margin = Inches(0.7); sc.right_margin = Inches(0.7)
+    TXT = _rgb(cfg["text_color"]); MUT = _rgb(cfg["muted_color"]); LGR = _rgb("BBBBBB")
+    COMPANY = _rgb(cfg["company_color"])
     from docx.oxml.ns import qn; from docx.oxml import OxmlElement
-    def shade(p,fill):
-        pPr=p._p.get_or_add_pPr(); shd=OxmlElement('w:shd')
-        shd.set(qn('w:val'),'clear'); shd.set(qn('w:color'),'auto'); shd.set(qn('w:fill'),fill); pPr.append(shd)
-    def bdr(p):
-        pPr=p._p.get_or_add_pPr(); pBdr=OxmlElement('w:pBdr')
-        b=OxmlElement('w:bottom'); b.set(qn('w:val'),'single'); b.set(qn('w:sz'),'6')
-        b.set(qn('w:space'),'1'); b.set(qn('w:color'),'F59E0B'); pBdr.append(b); pPr.append(pBdr)
-    def hp(txt,sz,col,bold=False,align=WD_ALIGN_PARAGRAPH.LEFT,before=0,after=4,sh=None):
-        p=doc.add_paragraph(); p.alignment=align
-        p.paragraph_format.space_before=Pt(before); p.paragraph_format.space_after=Pt(after)
-        r=p.add_run(str(txt or "")); r.bold=bold; r.font.size=Pt(sz); r.font.color.rgb=col; r.font.name="Calibri"
-        if sh: shade(p,sh)
+    def shade(p, fill):
+        pPr = p._p.get_or_add_pPr(); shd = OxmlElement('w:shd')
+        shd.set(qn('w:val'), 'clear'); shd.set(qn('w:color'), 'auto'); shd.set(qn('w:fill'), fill); pPr.append(shd)
+    def bdr(p, color, sz):
+        pPr = p._p.get_or_add_pPr(); pBdr = OxmlElement('w:pBdr')
+        b = OxmlElement('w:bottom'); b.set(qn('w:val'), 'single'); b.set(qn('w:sz'), str(sz))
+        b.set(qn('w:space'), '1'); b.set(qn('w:color'), color); pBdr.append(b); pPr.append(pBdr)
+    def hp(txt, sz, col, bold=False, align=WD_ALIGN_PARAGRAPH.LEFT, before=0, after=4, sh=None):
+        p = doc.add_paragraph(); p.alignment = align
+        p.paragraph_format.space_before = Pt(before); p.paragraph_format.space_after = Pt(after)
+        r = p.add_run(str(txt or "")); r.bold = bold; r.font.size = Pt(sz); r.font.color.rgb = col; r.font.name = F
+        if sh: shade(p, sh)
     def sec(t):
-        p=doc.add_paragraph(); p.paragraph_format.space_before=Pt(10); p.paragraph_format.space_after=Pt(4)
-        r=p.add_run(str(t)); r.bold=True; r.font.size=Pt(11); r.font.color.rgb=DARK; r.font.name="Calibri"; bdr(p)
-    def comp(lbl,val):
-        p=doc.add_paragraph(); p.paragraph_format.space_before=Pt(2); p.paragraph_format.space_after=Pt(2)
-        r1=p.add_run(str(lbl)+"  "); r1.bold=True; r1.font.color.rgb=DARK; r1.font.size=Pt(10); r1.font.name="Calibri"
-        r2=p.add_run(str(val)); r2.font.color.rgb=GRY; r2.font.size=Pt(10); r2.font.name="Calibri"
+        p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(10); p.paragraph_format.space_after = Pt(4)
+        r = p.add_run(str(t)); r.bold = True; r.font.size = Pt(11); r.font.color.rgb = _rgb(cfg["sec_color"]); r.font.name = F
+        if cfg["sec_rule"]: bdr(p, cfg["sec_rule"], cfg["sec_rule_sz"])
+    def comp(lbl, val):
+        p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(2); p.paragraph_format.space_after = Pt(2)
+        r1 = p.add_run(str(lbl) + "  "); r1.bold = True; r1.font.color.rgb = TXT; r1.font.size = Pt(10); r1.font.name = F
+        r2 = p.add_run(str(val)); r2.font.color.rgb = MUT; r2.font.size = Pt(10); r2.font.name = F
     def bul(txt):
-        p=doc.add_paragraph(); p.paragraph_format.space_before=Pt(2); p.paragraph_format.space_after=Pt(2)
-        p.paragraph_format.left_indent=Inches(0.2)
-        r1=p.add_run("▸  "); r1.bold=True; r1.font.color.rgb=AMB; r1.font.size=Pt(10); r1.font.name="Calibri"
-        r2=p.add_run(str(txt)); r2.font.size=Pt(10); r2.font.name="Calibri"
-    hp(data["name"],20,WHT,bold=True,align=WD_ALIGN_PARAGRAPH.CENTER,after=3,sh="1a1a1a")
-    hp(data["title"],11,AMB,bold=True,align=WD_ALIGN_PARAGRAPH.CENTER,after=3,sh="1a1a1a")
-    hp(data["contact"],9,LGR,align=WD_ALIGN_PARAGRAPH.CENTER,after=8,sh="1a1a1a")
+        p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(2); p.paragraph_format.space_after = Pt(2)
+        p.paragraph_format.left_indent = Inches(0.2)
+        r1 = p.add_run(cfg["bullet"] + "  "); r1.bold = True; r1.font.color.rgb = _rgb(cfg["bullet_color"]); r1.font.size = Pt(10); r1.font.name = F
+        r2 = p.add_run(str(txt)); r2.font.size = Pt(10); r2.font.name = F; r2.font.color.rgb = TXT
+    al = WD_ALIGN_PARAGRAPH.CENTER if cfg["align"] == "center" else WD_ALIGN_PARAGRAPH.LEFT
+    sh = cfg["banner_fill"] if cfg["banner"] else None
+    hp(data.get("name"), cfg["name_size"], _rgb(cfg["name_color"]), bold=True, align=al, after=3, sh=sh)
+    hp(data.get("title"), 11, _rgb(cfg["title_color"]), bold=True, align=al, after=3, sh=sh)
+    hp(data.get("contact"), 9, _rgb(cfg["contact_color"]), align=al, after=8, sh=sh)
     sec("PROFESSIONAL SUMMARY")
-    p=doc.add_paragraph(); p.paragraph_format.space_after=Pt(4)
-    r=p.add_run(str(data["summary"])); r.font.size=Pt(10); r.font.name="Calibri"
-    if data["competencies"]:
+    p = doc.add_paragraph(); p.paragraph_format.space_after = Pt(4)
+    r = p.add_run(str(data.get("summary", ""))); r.font.size = Pt(10); r.font.name = F; r.font.color.rgb = TXT
+    if data.get("competencies"):
         sec("CORE COMPETENCIES")
-        for c in data["competencies"]: comp(c["label"],c["value"])
+        for c in data["competencies"]: comp(c["label"], c["value"])
     sec(data.get("experience_heading", "WORK EXPERIENCE"))
-    for job in data["experience"]:
-        p=doc.add_paragraph(); p.paragraph_format.space_before=Pt(8); p.paragraph_format.space_after=Pt(2)
-        r1=p.add_run(str(job["title"])); r1.bold=True; r1.font.color.rgb=DARK; r1.font.size=Pt(11); r1.font.name="Calibri"
-        r2=p.add_run("  |  "); r2.font.color.rgb=LGR; r2.font.size=Pt(11)
-        r3=p.add_run(str(job["company"])); r3.bold=True; r3.font.color.rgb=BLU; r3.font.size=Pt(11); r3.font.name="Calibri"
-        r4=p.add_run("    "+str(job["dates"])); r4.italic=True; r4.font.color.rgb=GRY; r4.font.size=Pt(10); r4.font.name="Calibri"
-        for b in job["bullets"]: bul(b)
-    if data["skills"]:
+    for job in data.get("experience", []):
+        p = doc.add_paragraph(); p.paragraph_format.space_before = Pt(8); p.paragraph_format.space_after = Pt(2)
+        r1 = p.add_run(str(job.get("title", ""))); r1.bold = True; r1.font.color.rgb = TXT; r1.font.size = Pt(11); r1.font.name = F
+        r2 = p.add_run("  |  "); r2.font.color.rgb = LGR; r2.font.size = Pt(11); r2.font.name = F
+        r3 = p.add_run(str(job.get("company", ""))); r3.bold = True; r3.font.color.rgb = COMPANY; r3.font.size = Pt(11); r3.font.name = F
+        if job.get("dates"):
+            r4 = p.add_run("    " + str(job["dates"])); r4.italic = True; r4.font.color.rgb = MUT; r4.font.size = Pt(10); r4.font.name = F
+        for b in job.get("bullets", []): bul(b)
+    if data.get("skills"):
         sec("TECHNICAL SKILLS")
-        for s in data["skills"]: comp(s["label"],s["value"])
-    if data["achievements"]:
+        for s in data["skills"]: comp(s["label"], s["value"])
+    if data.get("achievements"):
         sec("KEY ACHIEVEMENTS")
         for a in data["achievements"]: bul(a)
     sec("EDUCATION")
-    p=doc.add_paragraph(); r=p.add_run(str(data["education"])); r.font.size=Pt(10); r.font.name="Calibri"
-    if data["certifications"]:
+    p = doc.add_paragraph(); r = p.add_run(str(data.get("education", ""))); r.font.size = Pt(10); r.font.name = F; r.font.color.rgb = TXT
+    if data.get("certifications"):
         sec("CERTIFICATIONS & LANGUAGES")
-        p=doc.add_paragraph(); r=p.add_run(str(data["certifications"])); r.font.size=Pt(10); r.font.name="Calibri"
-    buf=BytesIO(); doc.save(buf); buf.seek(0); return buf.read()
+        p = doc.add_paragraph(); r = p.add_run(str(data["certifications"])); r.font.size = Pt(10); r.font.name = F; r.font.color.rgb = TXT
+    buf = BytesIO(); doc.save(buf); buf.seek(0); return buf.read()
 
-def make_pdf(data):
-    buf=BytesIO()
-    doc=SimpleDocTemplate(buf,pagesize=A4,topMargin=14*mm,bottomMargin=14*mm,leftMargin=18*mm,rightMargin=18*mm)
-    DR=colors.HexColor("#1a1a1a"); AR=colors.HexColor("#F59E0B")
-    BR=colors.HexColor("#2E5FA3"); GR=colors.HexColor("#555555")
-    WR=colors.white; LR=colors.HexColor("#999999")
-    s=getSampleStyleSheet()
-    ns=ParagraphStyle("N",parent=s["Normal"],fontSize=20,textColor=WR,fontName="Helvetica-Bold",alignment=1,backColor=DR,spaceAfter=2,leading=26)
-    ts=ParagraphStyle("T",parent=s["Normal"],fontSize=11,textColor=AR,fontName="Helvetica-Bold",alignment=1,backColor=DR,spaceAfter=2,leading=16)
-    cs=ParagraphStyle("C",parent=s["Normal"],fontSize=9,textColor=LR,alignment=1,backColor=DR,spaceAfter=10,leading=14)
-    ss=ParagraphStyle("S",parent=s["Normal"],fontSize=10,textColor=DR,fontName="Helvetica-Bold",spaceBefore=10,spaceAfter=3,leading=15)
-    bs=ParagraphStyle("B",parent=s["Normal"],fontSize=9,textColor=GR,spaceBefore=2,spaceAfter=2,leading=13)
-    bus=ParagraphStyle("BU",parent=s["Normal"],fontSize=9,textColor=DR,spaceBefore=2,spaceAfter=2,leading=13,leftIndent=10)
-    bos=ParagraphStyle("BO",parent=s["Normal"],fontSize=9,spaceBefore=2,spaceAfter=2,leading=13)
-    story=[]
-    story.extend([Paragraph(str(data["name"]),ns),Paragraph(str(data["title"]),ts),Paragraph(str(data["contact"]),cs)])
-    def sec(t): story.append(Paragraph(t,ss)); story.append(HRFlowable(width="100%",thickness=1.5,color=AR,spaceAfter=4))
-    def bul(t): story.append(Paragraph(f'<font color="#F59E0B"><b>▸</b></font>  {t}',bus))
-    def comp(l,v): story.append(Paragraph(f'<font color="#1a1a1a"><b>{l}</b></font>  <font color="#555555">{v}</font>',bos))
-    sec("PROFESSIONAL SUMMARY"); story.append(Paragraph(str(data["summary"]),bs))
-    if data["competencies"]:
+def make_pdf(data, template="Bold"):
+    from xml.sax.saxutils import escape as _x
+    cfg = RESUME_TEMPLATES.get(template) or RESUME_TEMPLATES["Bold"]
+    C = lambda h: colors.HexColor("#" + h)
+    F, FB = cfg["pdf_font"], cfg["pdf_font_bold"]
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=14*mm, bottomMargin=14*mm, leftMargin=18*mm, rightMargin=18*mm)
+    back = C(cfg["banner_fill"]) if cfg["banner"] else None
+    align = 1 if cfg["align"] == "center" else 0
+    TX, MU, CO = cfg["text_color"], cfg["muted_color"], cfg["company_color"]
+    s = getSampleStyleSheet()
+    ns = ParagraphStyle("N", parent=s["Normal"], fontSize=cfg["name_size"], textColor=C(cfg["name_color"]), fontName=FB, alignment=align, backColor=back, spaceAfter=2, leading=cfg["name_size"] * 1.3)
+    ts = ParagraphStyle("T", parent=s["Normal"], fontSize=11, textColor=C(cfg["title_color"]), fontName=FB, alignment=align, backColor=back, spaceAfter=2, leading=16)
+    cs = ParagraphStyle("C", parent=s["Normal"], fontSize=9, textColor=C(cfg["contact_color"]), fontName=F, alignment=align, backColor=back, spaceAfter=10, leading=14)
+    ss = ParagraphStyle("S", parent=s["Normal"], fontSize=10, textColor=C(cfg["sec_color"]), fontName=FB, spaceBefore=10, spaceAfter=3, leading=15)
+    bs = ParagraphStyle("B", parent=s["Normal"], fontSize=9, textColor=C(MU), fontName=F, spaceBefore=2, spaceAfter=2, leading=13)
+    bus = ParagraphStyle("BU", parent=s["Normal"], fontSize=9, textColor=C(TX), fontName=F, spaceBefore=2, spaceAfter=2, leading=13, leftIndent=10)
+    bos = ParagraphStyle("BO", parent=s["Normal"], fontSize=9, fontName=F, spaceBefore=2, spaceAfter=2, leading=13)
+    story = []
+    story.extend([Paragraph(_x(str(data.get("name", ""))), ns), Paragraph(_x(str(data.get("title", ""))), ts), Paragraph(_x(str(data.get("contact", ""))), cs)])
+    def sec(t):
+        story.append(Paragraph(_x(t), ss))
+        if cfg["sec_rule"]: story.append(HRFlowable(width="100%", thickness=cfg["sec_rule_pdf"], color=C(cfg["sec_rule"]), spaceAfter=4))
+        else: story.append(Spacer(1, 2))
+    def bul(t): story.append(Paragraph(f'<font color="#{cfg["bullet_color"]}"><b>{cfg["bullet"]}</b></font>  {_x(t)}', bus))
+    def comp(l, v): story.append(Paragraph(f'<font color="#{TX}"><b>{_x(l)}</b></font>  <font color="#{MU}">{_x(v)}</font>', bos))
+    sec("PROFESSIONAL SUMMARY"); story.append(Paragraph(_x(str(data.get("summary", ""))), bs))
+    if data.get("competencies"):
         sec("CORE COMPETENCIES")
-        for c in data["competencies"]: comp(str(c["label"]),str(c["value"]))
+        for c in data["competencies"]: comp(str(c["label"]), str(c["value"]))
     sec(data.get("experience_heading", "WORK EXPERIENCE"))
-    for job in data["experience"]:
-        story.append(Spacer(1,4))
+    for job in data.get("experience", []):
+        story.append(Spacer(1, 4))
+        dates = f'<font color="#{MU}"><i>    {_x(str(job["dates"]))}</i></font>' if job.get("dates") else ""
         story.append(Paragraph(
-            f'<font color="#1a1a1a"><b>{job["title"]}</b></font>'
+            f'<font color="#{TX}"><b>{_x(str(job.get("title", "")))}</b></font>'
             f'<font color="#bbbbbb">  |  </font>'
-            f'<font color="#2E5FA3"><b>{job["company"]}</b></font>'
-            f'<font color="#555555"><i>    {job["dates"]}</i></font>',bos))
-        for b in job["bullets"]: bul(str(b))
-    if data["skills"]:
+            f'<font color="#{CO}"><b>{_x(str(job.get("company", "")))}</b></font>' + dates, bos))
+        for b in job.get("bullets", []): bul(str(b))
+    if data.get("skills"):
         sec("TECHNICAL SKILLS")
-        for sk in data["skills"]: comp(str(sk["label"]),str(sk["value"]))
-    if data["achievements"]:
+        for sk in data["skills"]: comp(str(sk["label"]), str(sk["value"]))
+    if data.get("achievements"):
         sec("KEY ACHIEVEMENTS")
         for a in data["achievements"]: bul(str(a))
-    sec("EDUCATION"); story.append(Paragraph(str(data["education"]),bs))
-    if data["certifications"]:
-        sec("CERTIFICATIONS & LANGUAGES"); story.append(Paragraph(str(data["certifications"]),bs))
+    sec("EDUCATION"); story.append(Paragraph(_x(str(data.get("education", ""))), bs))
+    if data.get("certifications"):
+        sec("CERTIFICATIONS & LANGUAGES"); story.append(Paragraph(_x(str(data["certifications"])), bs))
     doc.build(story); buf.seek(0); return buf.read()
+
+def render_resume_downloads(data, key_suffix, title, subtitle):
+    """Format picker + PDF/DOCX download buttons. Regenerates files from the
+    stored resume data whenever the chosen format changes (cached per data+format)."""
+    st.markdown(f"""
+<div class="dl-bar">
+  <div class="dl-bar-title">{title}</div>
+  <div class="dl-bar-sub">{subtitle}</div>
+</div>""", unsafe_allow_html=True)
+    tpl = st.selectbox("Resume format", list(RESUME_TEMPLATES.keys()),
+        format_func=lambda k: RESUME_TEMPLATES[k]["label"], key=f"resume_tpl_{key_suffix}")
+    sig = json.dumps(data, sort_keys=True, default=str) + "|" + tpl
+    cache = st.session_state.get("_dl_cache") or {}
+    if cache.get("sig") != sig:
+        cache = {"sig": sig, "pdf": make_pdf(data, tpl), "docx": make_docx(data, tpl)}
+        st.session_state["_dl_cache"] = cache
+    base = re.sub(r"[^A-Za-z0-9]+", "_", str(data.get("name", "") or "")).strip("_") or "ProfileIQ"
+    d1, d2 = st.columns(2, gap="medium")
+    with d1:
+        st.download_button("⬇  Download PDF", data=cache["pdf"],
+            file_name=f"{base}_Resume.pdf", mime="application/pdf",
+            use_container_width=True, key=f"dl_pdf_{key_suffix}")
+    with d2:
+        st.download_button("⬇  Download Word (.docx)", data=cache["docx"],
+            file_name=f"{base}_Resume.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True, key=f"dl_docx_{key_suffix}")
+
 
 # ══════════════════════════════════════
 # AUTH GATE — show login if not logged in
@@ -1184,10 +1290,16 @@ header[data-testid="stHeader"] { display: none !important; }
             st.markdown('<div class="free-badge">Free plan: 3 resume scans/month | No credit card needed</div>', unsafe_allow_html=True)
             name = st.text_input("Full name", placeholder="Your full name", key="reg_name")
             email = st.text_input("Email", placeholder="you@email.com", key="reg_email")
+            mobile = st.text_input("Mobile number", placeholder="10-digit mobile, e.g. 98765 43210", key="reg_mobile")
             password = st.text_input("Password", type="password", placeholder="Min 6 characters", key="reg_pass")
             if st.button("Create account", type="primary", use_container_width=True):
-                if email and password and name:
-                    if len(password) < 6:
+                phone_norm = normalize_indian_mobile(mobile)
+                if email and password and name and mobile:
+                    if not is_valid_email(email):
+                        st.markdown('<div class="auth-error">⚠️ Please enter a valid email address</div>', unsafe_allow_html=True)
+                    elif not phone_norm:
+                        st.markdown('<div class="auth-error">⚠️ Please enter a valid 10-digit Indian mobile number</div>', unsafe_allow_html=True)
+                    elif len(password) < 6:
                         st.markdown('<div class="auth-error">⚠️ Password must be at least 6 characters</div>', unsafe_allow_html=True)
                     else:
                         with st.spinner("Creating account..."):
@@ -1201,9 +1313,16 @@ header[data-testid="stHeader"] { display: none !important; }
                                 st.session_state.user = login_res["user"]
                                 uid = login_res["user"]["id"]
                                 token = login_res["access_token"]
-                                requests.patch(f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{uid}",
+                                _pr = requests.patch(f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{uid}",
                                     headers={**sb_headers(token), "Prefer": "return=minimal"},
-                                    json={"full_name": name})
+                                    json={"full_name": name, "phone": phone_norm})
+                                if _pr.status_code not in (200, 204):
+                                    # e.g. the `phone` column migration hasn't been run yet —
+                                    # never lose the customer's name because of it.
+                                    print(f"[signup] profile save with phone failed ({_pr.status_code}): {_pr.text[:200]}")
+                                    requests.patch(f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{uid}",
+                                        headers={**sb_headers(token), "Prefer": "return=minimal"},
+                                        json={"full_name": name})
                                 profile = sb_get_profile(token, uid)
                                 st.session_state.profile = profile
                                 st.rerun()
@@ -1920,23 +2039,9 @@ if not st.session_state.is_fresher_mode:
 
         if st.session_state.rewrite_data and st.session_state.pdf_bytes:
             data = st.session_state.rewrite_data
-            st.markdown("""
-    <div class="dl-bar">
-      <div class="dl-bar-title">Your optimized resume is ready ✓</div>
-      <div class="dl-bar-sub">ATS score updated in the dashboard above · Download both formats below</div>
-    </div>""", unsafe_allow_html=True)
-            d1, d2 = st.columns(2, gap="medium")
-            with d1:
-                st.download_button("⬇  Download PDF",
-                    data=st.session_state.pdf_bytes,
-                    file_name="ProfileIQ_Resume.pdf", mime="application/pdf",
-                    use_container_width=True, key="dl_pdf")
-            with d2:
-                st.download_button("⬇  Download Word (.docx)",
-                    data=st.session_state.docx_bytes,
-                    file_name="ProfileIQ_Resume.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True, key="dl_docx")
+            render_resume_downloads(data, "rewrite",
+                "Your optimized resume is ready ✓",
+                "ATS score updated in the dashboard above · Choose a format and download below")
 
             # ── FULL PREVIEW ──
             with st.expander("Preview rewritten resume"):
@@ -2074,23 +2179,9 @@ else:
 
     if st.session_state.rewrite_data and st.session_state.pdf_bytes:
         data = st.session_state.rewrite_data
-        st.markdown("""
-<div class="dl-bar">
-  <div class="dl-bar-title">Your resume is ready ✓</div>
-  <div class="dl-bar-sub">ATS score shown in the dashboard above · Download both formats below</div>
-</div>""", unsafe_allow_html=True)
-        d1, d2 = st.columns(2, gap="medium")
-        with d1:
-            st.download_button("⬇  Download PDF",
-                data=st.session_state.pdf_bytes,
-                file_name="ProfileIQ_Resume.pdf", mime="application/pdf",
-                use_container_width=True, key="dl_pdf_fresher")
-        with d2:
-            st.download_button("⬇  Download Word (.docx)",
-                data=st.session_state.docx_bytes,
-                file_name="ProfileIQ_Resume.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True, key="dl_docx_fresher")
+        render_resume_downloads(data, "fresher",
+            "Your resume is ready ✓",
+            "ATS score shown in the dashboard above · Choose a format and download below")
 
         with st.expander("Preview your resume"):
             d = st.session_state.rewrite_data
