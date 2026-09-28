@@ -1158,6 +1158,78 @@ def make_pdf(data, template="Bold"):
         sec("CERTIFICATIONS & LANGUAGES"); story.append(Paragraph(_x(str(data["certifications"])), bs))
     doc.build(story); buf.seek(0); return buf.read()
 
+def resume_preview_html(data, tpl):
+    """Built-in preview of the chosen format as a white 'paper' card. Needs no
+    extra libraries, so a preview is always visible; it mirrors each format's
+    fonts, colours and layout (the download uses the exact layout)."""
+    from html import escape as _e
+    cfg = RESUME_TEMPLATES.get(tpl) or RESUME_TEMPLATES["Bold"]
+    fam = cfg["font_docx"]
+    # NB: no quote characters here - this value sits inside a single-quoted
+    # style='...' attribute, and a stray ' would cut the whole style off.
+    ff = ("Times New Roman,Times,serif" if fam == "Times New Roman"
+          else "Arial,Helvetica,sans-serif" if fam == "Arial"
+          else "Calibri,Carlito,Segoe UI,Helvetica,Arial,sans-serif")
+    H = lambda h: "#" + h
+    ta = "center" if cfg["align"] == "center" else "left"
+    TX, MU, CO = H(cfg["text_color"]), H(cfg["muted_color"]), H(cfg["company_color"])
+    P = []
+    banner = f"background:{H(cfg['banner_fill'])};padding:10px 8px;" if cfg["banner"] else ""
+    P.append(
+        f"<div style='{banner}text-align:{ta};margin-bottom:6px'>"
+        f"<div style='font-size:{cfg['name_size'] * 0.85:.0f}px;font-weight:800;color:{H(cfg['name_color'])};line-height:1.2'>{_e(str(data.get('name','')))}</div>"
+        f"<div style='font-size:10.5px;font-weight:700;color:{H(cfg['title_color'])};margin-top:2px'>{_e(str(data.get('title','')))}</div>"
+        f"<div style='font-size:8.5px;color:{H(cfg['contact_color'])};margin-top:2px'>{_e(str(data.get('contact','')))}</div></div>")
+    def sec(t):
+        rule = f"border-bottom:{cfg['sec_rule_pdf']}px solid {H(cfg['sec_rule'])};" if cfg["sec_rule"] else ""
+        P.append(f"<div style='font-size:10px;font-weight:800;color:{H(cfg['sec_color'])};margin:11px 0 5px;padding-bottom:2px;{rule}'>{_e(t)}</div>")
+    def line(lbl, val):
+        P.append(f"<div style='margin:2px 0'><b style='color:{TX}'>{_e(str(lbl))}</b>&nbsp; <span style='color:{MU}'>{_e(str(val))}</span></div>")
+    def bul(t):
+        P.append(f"<div style='margin:2px 0 2px 10px;color:{TX}'><span style='color:{H(cfg['bullet_color'])};font-weight:700'>{cfg['bullet']}</span>&nbsp; {_e(str(t))}</div>")
+    sec("PROFESSIONAL SUMMARY"); P.append(f"<div style='color:{MU}'>{_e(str(data.get('summary','')))}</div>")
+    if data.get("competencies"):
+        sec("CORE COMPETENCIES")
+        for c in data["competencies"]: line(c.get("label", ""), c.get("value", ""))
+    sec(data.get("experience_heading", "WORK EXPERIENCE"))
+    for job in data.get("experience", []):
+        dates = f" <i style='color:{MU}'>&nbsp;{_e(str(job['dates']))}</i>" if job.get("dates") else ""
+        P.append(f"<div style='margin-top:7px'><b style='color:{TX}'>{_e(str(job.get('title','')))}</b>"
+                 f"<span style='color:#bbb'> &nbsp;|&nbsp; </span><b style='color:{CO}'>{_e(str(job.get('company','')))}</b>{dates}</div>")
+        for b in job.get("bullets", []): bul(b)
+    if data.get("skills"):
+        sec("TECHNICAL SKILLS")
+        for s in data["skills"]: line(s.get("label", ""), s.get("value", ""))
+    if data.get("achievements"):
+        sec("KEY ACHIEVEMENTS")
+        for a in data["achievements"]: bul(a)
+    sec("EDUCATION"); P.append(f"<div style='color:{MU}'>{_e(str(data.get('education','')))}</div>")
+    if data.get("certifications"):
+        sec("CERTIFICATIONS & LANGUAGES"); P.append(f"<div style='color:{MU}'>{_e(str(data['certifications']))}</div>")
+    # single line on purpose: blank/indented lines would be parsed as markdown code
+    return (f"<div style='background:#fff;color:{TX};font-family:{ff};font-size:10px;line-height:1.5;"
+            f"padding:24px 28px;border-radius:6px;box-shadow:0 2px 14px rgba(0,0,0,.5);max-width:560px;margin:2px 0 10px'>"
+            + "".join(P) + "</div>")
+
+def pdf_page_previews(pdf_bytes, zoom=1.7, max_pages=2):
+    """Render the first page(s) of a PDF to PNG bytes for the on-screen preview.
+    Returns (pngs, total_pages). Fails soft: if rendering isn't available the
+    app just skips the image preview instead of crashing."""
+    try:
+        try:
+            import pymupdf as _mu
+        except ImportError:
+            import fitz as _mu
+        doc = _mu.open(stream=pdf_bytes, filetype="pdf")
+        total = doc.page_count
+        pngs = [doc[i].get_pixmap(matrix=_mu.Matrix(zoom, zoom)).tobytes("png")
+                for i in range(min(total, max_pages))]
+        doc.close()
+        return pngs, total
+    except Exception as e:
+        print(f"[preview] render failed: {e}")
+        return [], 0
+
 def render_resume_downloads(data, key_suffix, title, subtitle):
     """Format picker + PDF/DOCX download buttons. Regenerates files from the
     stored resume data whenever the chosen format changes (cached per data+format)."""
@@ -1171,8 +1243,25 @@ def render_resume_downloads(data, key_suffix, title, subtitle):
     sig = json.dumps(data, sort_keys=True, default=str) + "|" + tpl
     cache = st.session_state.get("_dl_cache") or {}
     if cache.get("sig") != sig:
-        cache = {"sig": sig, "pdf": make_pdf(data, tpl), "docx": make_docx(data, tpl)}
+        _pdf = make_pdf(data, tpl)
+        _pngs, _pages = pdf_page_previews(_pdf)
+        cache = {"sig": sig, "pdf": _pdf, "docx": make_docx(data, tpl), "pngs": _pngs, "pages": _pages}
         st.session_state["_dl_cache"] = cache
+    st.markdown(
+        f"<style>[data-testid='stImage'] img {{border:1px solid #2a2a2a;border-radius:6px;}}</style>"
+        f"<div style='font-size:10px;font-weight:700;color:#888;letter-spacing:0.12em;margin:6px 0 8px'>"
+        f"PREVIEW · {RESUME_TEMPLATES[tpl]['label'].split(' — ')[0].upper()} FORMAT</div>",
+        unsafe_allow_html=True)
+    if cache.get("pngs"):
+        # exact page render of the file you will download
+        for _png in cache["pngs"]:
+            st.image(_png, width=560)
+        if cache.get("pages", 0) > len(cache["pngs"]):
+            st.caption(f"Showing the first {len(cache['pngs'])} of {cache['pages']} pages — the download has the full resume.")
+    else:
+        # always-available built-in preview (no extra libraries needed)
+        st.markdown(resume_preview_html(data, tpl), unsafe_allow_html=True)
+        st.caption("Preview of the selected format — your download uses the exact layout.")
     base = re.sub(r"[^A-Za-z0-9]+", "_", str(data.get("name", "") or "")).strip("_") or "ProfileIQ"
     d1, d2 = st.columns(2, gap="medium")
     with d1:
