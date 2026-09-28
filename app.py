@@ -788,16 +788,14 @@ st.markdown("""
 /* Fix password toggle visibili text */
 button[aria-label="Show password"],
 button[aria-label="Hide password"] { display: none !important; }
-/* Fix button text wrapping */
-.stButton > button { white-space: nowrap !important; }
+/* Button labels wrap instead of being cut off - see BUTTONS below */
 
 /* ── GLOBAL FIXES ── */
 /* Hide password visibility toggle everywhere */
 [data-testid="stPasswordFieldToggle"] { display: none !important; }
 /* Hide InputInstructions */
 [data-testid="InputInstructions"] { display: none !important; }
-/* Fix button text wrapping */
-.stButton > button { white-space: nowrap !important; }
+/* Button labels wrap instead of being cut off - see BUTTONS below */
 
 /* ── HERO ── */
 .hero { display: grid; grid-template-columns: 1.1fr 1fr; border-radius: 16px; overflow: hidden; margin-bottom: 20px; min-height: 250px; }
@@ -836,9 +834,9 @@ button[aria-label="Hide password"] { display: none !important; }
    stay side-by-side, but too narrow for full button labels. Shrink text
    and padding here instead of truncating. */
 @media (min-width: 769px) and (max-width: 1100px) {
-    .stButton > button {
+    .stButton > button, .stDownloadButton > button {
         font-size: 10px !important;
-        padding: 11px 10px !important;
+        padding: 11px 8px !important;
         letter-spacing: 0.03em !important;
     }
 }
@@ -992,33 +990,60 @@ div[data-testid="stRadio"] label:hover { color: #ddd !important; }
 div[data-testid="stRadio"] input { display: none !important; }
 div[data-testid="stRadio"] [data-testid="stMarkdownContainer"] p { font-size: 11px !important; margin: 0 !important; font-weight: 800 !important; }
 
-/* ── BUTTONS ── */
-.stButton > button {
+/* ── BUTTONS ── (normal buttons AND download buttons share one amber/black style) */
+.stButton > button, .stDownloadButton > button {
     font-family: 'Inter', sans-serif !important; font-weight: 800 !important;
     font-size: 12px !important; letter-spacing: 0.07em !important;
     text-transform: uppercase !important; border-radius: 8px !important;
-    padding: 13px 24px !important; width: 100% !important; transition: opacity 0.15s !important;
+    padding: 13px 14px !important; width: 100% !important; transition: opacity 0.15s !important;
     background: #F59E0B !important; color: #1a1a1a !important; border: none !important;
     text-align: center !important; display: flex !important;
     align-items: center !important; justify-content: center !important;
+    /* the WHOLE label always shows: it wraps onto a second line instead of being cut off with "..." */
+    white-space: normal !important; overflow: visible !important; min-width: 0 !important;
+    height: auto !important; min-height: 44px !important; line-height: 1.25 !important;
 }
-.stButton > button p, .stButton > button div, .stButton > button span {
-    text-align: center !important; width: auto !important;
-    overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important;
+.stButton > button *, .stDownloadButton > button * {
+    text-align: center !important; margin: 0 !important; color: #1a1a1a !important;
+    overflow: visible !important; text-overflow: clip !important; white-space: normal !important;
 }
-.stButton > button { overflow: hidden !important; min-width: 0 !important; }
-.stButton > button:hover { opacity: 0.88 !important; }
-.stButton > button:disabled { background: #7a5200 !important; color: #333 !important; opacity: 0.5 !important; }
+.stButton > button:hover, .stButton > button:focus:not(:active), .stButton > button:active,
+.stDownloadButton > button:hover, .stDownloadButton > button:focus:not(:active), .stDownloadButton > button:active {
+    background: #F59E0B !important; color: #1a1a1a !important; border: none !important; opacity: 0.88 !important;
+}
+.stButton > button:disabled, .stDownloadButton > button:disabled { background: #7a5200 !important; opacity: 0.5 !important; }
 .stButton > button[kind="secondary"] { background: #F59E0B !important; color: #1a1a1a !important; border: none !important; }
-.stButton > button[kind="secondary"]:hover { opacity: 0.88 !important; }
 
-/* ── DOWNLOAD BUTTONS ── */
-.stDownloadButton > button {
-    font-family: 'Inter', sans-serif !important; font-weight: 800 !important;
-    font-size: 12px !important; letter-spacing: 0.06em !important;
-    text-transform: uppercase !important; border-radius: 8px !important;
-    padding: 13px 20px !important; width: 100% !important;
+/* ── FORM LABELS ── white so they are readable on the dark background */
+[data-testid="stMarkdownContainer"] h1, [data-testid="stMarkdownContainer"] h2, [data-testid="stMarkdownContainer"] h3,
+[data-testid="stMarkdownContainer"] h4, [data-testid="stMarkdownContainer"] h5, [data-testid="stMarkdownContainer"] h6 { color: #ffffff !important; }
+[data-testid="stWidgetLabel"], [data-testid="stWidgetLabel"] *, .stSelectbox label, .stSelectbox label * {
+    color: #ffffff !important; font-weight: 700 !important;
 }
+
+/* ── DROPDOWNS ── amber to match the app theme (works for the newer and older Streamlit markup) */
+[data-testid="stSelectbox"] [role="group"], [data-testid="stSelectbox"] [data-baseweb="select"] > div {
+    background-color: #F59E0B !important; border: 1.5px solid #D97706 !important; border-radius: 8px !important; box-shadow: none !important;
+}
+[data-testid="stSelectbox"] [role="group"]:focus-within, [data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within {
+    border-color: #B45309 !important; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.35) !important;
+}
+[data-testid="stSelectbox"] input, [data-testid="stSelectbox"] [data-baseweb="select"] * {
+    color: #1a1a1a !important; -webkit-text-fill-color: #1a1a1a !important; font-weight: 700 !important; caret-color: #1a1a1a !important;
+}
+[data-testid="stSelectbox"] input::placeholder { color: #5b3b00 !important; -webkit-text-fill-color: #5b3b00 !important; }
+[data-testid="stSelectbox"] svg { fill: #1a1a1a !important; color: #1a1a1a !important; }
+/* the open list of choices */
+[data-testid="stSelectboxVirtualDropdown"], div[data-baseweb="popover"]:has([role="listbox"]) > div, [data-baseweb="popover"] [data-baseweb="menu"] {
+    background: #F59E0B !important; border: 1.5px solid #D97706 !important; border-radius: 8px !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+}
+[role="listbox"], ul[role="listbox"] { background: transparent !important; }
+[role="option"], li[role="option"] { background: transparent !important; color: #1a1a1a !important; font-weight: 600 !important; }
+[role="option"] *, li[role="option"] * { color: #1a1a1a !important; -webkit-text-fill-color: #1a1a1a !important; }
+[role="option"]:hover, [role="option"][data-focused="true"], li[role="option"]:hover { background: #D97706 !important; }
+[role="option"][aria-selected="true"], li[role="option"][aria-selected="true"] { background: #B45309 !important; }
+[role="option"][aria-selected="true"], [role="option"][aria-selected="true"] * { color: #ffffff !important; -webkit-text-fill-color: #ffffff !important; font-weight: 800 !important; }
 
 /* ── RESULTS ── */
 .results-wrap { display: grid; grid-template-columns: 200px 1fr; gap: 14px; margin-bottom: 18px; }
@@ -2064,7 +2089,7 @@ st.markdown(f"""
 
 has_billing = user_is_pro or bool((profile or {}).get("razorpay_subscription_id"))
 if has_billing:
-    user_col1, user_col2, user_col3, user_col4 = st.columns([5.5, 1.6, 1.1, 1.1])
+    user_col1, user_col2, user_col3, user_col4 = st.columns([4, 1.5, 1.4, 1.6])
     with user_col2:
         if st.button("Manage" if user_is_pro else "Billing", use_container_width=True, key="btn_manage_sub"):
             st.session_state.show_manage_sub = not st.session_state.show_manage_sub
@@ -2078,7 +2103,7 @@ if has_billing:
         if st.button("Sign out", use_container_width=True, key="btn_logout"):
             logout()
 else:
-    user_col1, user_col2, user_col3 = st.columns([7, 1, 1])
+    user_col1, user_col2, user_col3 = st.columns([5, 1.4, 1.6])
     with user_col2:
         if st.button("Support", use_container_width=True, key="btn_support"):
             st.session_state.show_support = not st.session_state.show_support
