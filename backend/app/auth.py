@@ -13,8 +13,13 @@ _CACHE_SECONDS = 60
 
 
 def _service_headers():
-    return {"apikey": config.SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {config.SUPABASE_SERVICE_KEY}",
-            "Content-Type": "application/json"}
+    key = config.SUPABASE_SERVICE_KEY
+    h = {"apikey": key, "Content-Type": "application/json"}
+    # Legacy service_role keys are JWTs and go in Authorization too; the newer "sb_secret_..." keys are not
+    # JWTs and must be sent in the apikey header only.
+    if not key.startswith("sb_"):
+        h["Authorization"] = f"Bearer {key}"
+    return h
 
 
 def verify_token(token: str) -> dict:

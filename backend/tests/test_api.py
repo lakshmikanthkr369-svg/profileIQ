@@ -311,3 +311,11 @@ def test_subscribe_is_rate_limited(client, monkeypatch):
     _fake_rzp(monkeypatch)
     codes = [client.post("/v1/billing/subscribe", json={"mobile": "9876543210"}).status_code for _ in range(12)]
     assert codes[9] == 200 and codes[10] == 429
+
+
+def test_service_headers_support_new_and_legacy_keys(monkeypatch):
+    monkeypatch.setattr(auth.config, "SUPABASE_SERVICE_KEY", "eyJlegacy.jwt.key")
+    assert auth._service_headers()["Authorization"] == "Bearer eyJlegacy.jwt.key"
+    monkeypatch.setattr(auth.config, "SUPABASE_SERVICE_KEY", "sb_secret_abc")
+    h = auth._service_headers()
+    assert h["apikey"] == "sb_secret_abc" and "Authorization" not in h
