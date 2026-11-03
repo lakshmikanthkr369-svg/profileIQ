@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { isValidEmail, normalizeIndianMobile } from "@/lib/validate";
 
@@ -21,6 +21,25 @@ export default function AuthForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  const formRef = useRef<HTMLFormElement>(null);
+
+  // Phone/browser credential suggestions fill the fields without telling React. Copy whatever is in the
+  // fields into state on page load, on autofill animation, and on any tap, so nothing looks "empty".
+  function syncFromDom() {
+    const f = formRef.current; if (!f) return;
+    const get = (n: string) => (f.elements.namedItem(n) as HTMLInputElement | null)?.value;
+    const e = get("email"), p = get("password"), n = get("name"), m = get("mobile");
+    if (e !== undefined) setEmail((x) => (x === e ? x : e));
+    if (p !== undefined) setPassword((x) => (x === p ? x : p));
+    if (n !== undefined) setName((x) => (x === n ? x : n));
+    if (m !== undefined) setMobile((x) => (x === m ? x : m));
+  }
+  useEffect(() => {
+    const id = setInterval(syncFromDom, 400);
+    const stop = setTimeout(() => clearInterval(id), 8000);
+    return () => { clearInterval(id); clearTimeout(stop); };
+  }, []);
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
 
@@ -67,7 +86,7 @@ export default function AuthForm() {
   }
 
   return (
-    <form className="card" method="post" action="#" onSubmit={submit} noValidate>
+    <form ref={formRef} className="card" method="post" action="#" onSubmit={submit} onAnimationStart={syncFromDom} onPointerDown={syncFromDom} noValidate>
       <h2 style={{ marginTop: 0 }}>{mode === "login" ? "Log in" : mode === "signup" ? "Create your account" : "Reset password"}</h2>
       {mode === "signup" && (<>
         <label htmlFor="name">Full name</label>
