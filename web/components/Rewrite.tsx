@@ -11,11 +11,12 @@ const EMPTY: FresherProfile = {
   key_skills: "", projects: [{ name: "", description: "" }], certifications: [],
 };
 
-interface Props { me: Me | null; file: File | null; jd: string; onUpgraded: (m: Me) => void }
+interface Props { me: Me | null; file: File | null; jd: string; mode: "existing" | "fresher"; onUpgraded: (m: Me) => void }
 type Err = { message: string; ref: string } | null;
 
-export default function Rewrite({ me, file, jd, onUpgraded }: Props) {
-  const [mode, setMode] = useState<"existing" | "fresher">("existing");
+export default function Rewrite({ me, file, jd, mode, onUpgraded }: Props) {
+  const [needUpgrade, setNeedUpgrade] = useState(false);
+  const locked = !!me && !me.is_pro;
   const [templates, setTemplates] = useState<string[]>([]);
   const [template, setTemplate] = useState("Bold");
   const [data, setData] = useState<ResumeData | null>(null);
@@ -41,6 +42,7 @@ export default function Rewrite({ me, file, jd, onUpgraded }: Props) {
 
   async function runRewrite() {
     setError(null);
+    if (locked) return setNeedUpgrade(true);
     if (!file) return setError({ message: "Upload your resume above first.", ref: "no-file" });
     if (!jd.trim()) return setError({ message: "Paste a job description above first.", ref: "no-jd" });
     setBusy("Rewriting your resume — this takes about 30 seconds…");
@@ -50,6 +52,7 @@ export default function Rewrite({ me, file, jd, onUpgraded }: Props) {
 
   async function runFresher() {
     setError(null);
+    if (locked) return setNeedUpgrade(true);
     if (!jd.trim()) return setError({ message: "Paste a job description above first.", ref: "no-jd" });
     setBusy("Building your resume — this takes about 30 seconds…");
     try {
@@ -67,27 +70,21 @@ export default function Rewrite({ me, file, jd, onUpgraded }: Props) {
   const set = (k: keyof FresherProfile) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setFresher((f) => ({ ...f, [k]: e.target.value }));
 
-  const locked = !!me && !me.is_pro;
-
   return (
     <>
-      {locked && (
+      {locked && needUpgrade && (
         <div className="card" style={{ marginBottom: 12 }}>
-          <strong>Rewrite with AI is a Pro feature.</strong>
-          <p className="muted" style={{ margin: "6px 0 12px" }}>Upgrade to Pro to get an ATS-optimised rewrite, four resume formats and PDF/Word downloads — for experienced professionals and freshers alike.</p>
-          <Upgrade me={me} onUpgraded={onUpgraded} />
+          <strong>{mode === "fresher" ? "Writing a new resume is a Pro feature." : "Rewriting your resume is a Pro feature."}</strong>
+          <p className="muted" style={{ margin: "6px 0 12px" }}>Upgrade to Pro to get an ATS-optimised resume, four resume formats and PDF/Word downloads. {mode === "fresher" ? "Your details are saved here — just upgrade and tap Write my resume again." : "Upgrade and tap Rewrite again."}</p>
+          <Upgrade me={me} onUpgraded={(m) => { setNeedUpgrade(false); onUpgraded(m); }} />
         </div>
       )}
-      <div className="tabs" role="tablist" style={{ marginTop: 0 }}>
-        <button className={mode === "existing" ? "on" : ""} onClick={() => setMode("existing")}>I'm experienced — I have a resume</button>
-        <button className={mode === "fresher" ? "on" : ""} onClick={() => setMode("fresher")}>I&apos;m a fresher</button>
-      </div>
 
       {mode === "existing" ? (
-        <button onClick={runRewrite} disabled={!!busy || locked}>{busy && !data ? "Working…" : locked ? "Rewrite my resume (Pro)" : "Rewrite my resume"}</button>
+        <button onClick={runRewrite} disabled={!!busy}>{busy && !data ? "Working…" : "Rewrite my resume with AI"}{locked ? " (Pro)" : ""}</button>
       ) : (
         <div className="card">
-          <p className="muted" style={{ marginTop: 0 }}>No resume yet? Tell us about yourself and we&apos;ll build one for this job.</p>
+          <p className="muted" style={{ marginTop: 0 }}>Fresher? Fill in your details and we&apos;ll write your resume for this job.</p>
           <div className="grid2">
             <label>Full name *<input type="text" value={fresher.full_name} onChange={set("full_name")} /></label>
             <label>Email *<input type="email" value={fresher.email} onChange={set("email")} /></label>
@@ -115,7 +112,7 @@ export default function Rewrite({ me, file, jd, onUpgraded }: Props) {
           ))}
           <button className="ghost" onClick={() => setFresher((f) => ({ ...f, certifications: [...f.certifications, { name: "" }] }))}>+ Add certification</button>
           <div style={{ height: 12 }} />
-          <button onClick={runFresher} disabled={!!busy || locked}>{locked ? "Build my resume (Pro)" : "Build my resume"}</button>
+          <button onClick={runFresher} disabled={!!busy}>{busy && !data ? "Working…" : "Write my resume"}{locked ? " (Pro)" : ""}</button>
         </div>
       )}
 

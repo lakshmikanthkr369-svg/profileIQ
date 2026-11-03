@@ -16,7 +16,7 @@ export default function Dashboard() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ message: string; ref: string } | null>(null);
   const [result, setResult] = useState<ScoreResult | null>(null);
-  const [tab, setTab] = useState<"score" | "rewrite">("score");
+  const [level, setLevel] = useState<"existing" | "fresher">("existing");
   const picker = useRef<HTMLInputElement>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [panel, setPanel] = useState<"" | "billing" | "support">("");
@@ -95,36 +95,38 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="grid2" style={{ marginTop: 12 }}>
-        <div>
-          <h2>Your resume</h2>
-          {file && (
-            <div className="file"><span>{file.name} · {(file.size / 1024).toFixed(0)} KB</span>
-              <button className="ghost" onClick={() => { setFile(null); setResult(null); if (picker.current) picker.current.value = ""; }}>Remove</button></div>
-          )}
-          <label className="drop" htmlFor="resume-input">
-            <span className="muted">PDF, DOC or DOCX · up to {MAX_MB} MB</span>
-            <span className="btn" role="button">{file ? "Upload a different resume" : "Upload"}</span>
-            <input id="resume-input" ref={picker} type="file" accept=".pdf,.doc,.docx" onChange={(e) => choose(e.target.files?.[0])} />
-          </label>
-        </div>
-        <div>
+      <div className="tabs" role="tablist" style={{ marginTop: 12 }}>
+        <button role="tab" aria-selected={level === "existing"} className={level === "existing" ? "on" : ""} onClick={() => setLevel("existing")}>I&apos;m experienced</button>
+        <button role="tab" aria-selected={level === "fresher"} className={level === "fresher" ? "on" : ""} onClick={() => setLevel("fresher")}>I&apos;m a fresher</button>
+      </div>
+
+      <div className="grid2" style={{ marginTop: 4 }}>
+        {level === "existing" && (
+          <div>
+            <h2>Your resume</h2>
+            {file && (
+              <div className="file"><span>{file.name} · {(file.size / 1024).toFixed(0)} KB</span>
+                <button className="ghost" onClick={() => { setFile(null); setResult(null); if (picker.current) picker.current.value = ""; }}>Remove</button></div>
+            )}
+            <label className="drop" htmlFor="resume-input">
+              <span className="muted">PDF, DOC or DOCX · up to {MAX_MB} MB</span>
+              <span className="btn" role="button">{file ? "Upload a different resume" : "Upload"}</span>
+              <input id="resume-input" ref={picker} type="file" accept=".pdf,.doc,.docx" onChange={(e) => choose(e.target.files?.[0])} />
+            </label>
+          </div>
+        )}
+        <div style={level === "fresher" ? { gridColumn: "1 / -1" } : undefined}>
           <h2>Job description</h2>
           <textarea value={jd} onChange={(e) => setJd(e.target.value)} placeholder="Paste the full job description here — the more detail, the better the match." />
         </div>
       </div>
 
-      <div className="tabs" role="tablist">
-        <button role="tab" aria-selected={tab === "score"} className={tab === "score" ? "on" : ""} onClick={() => setTab("score")}>Score my resume</button>
-        <button role="tab" aria-selected={tab === "rewrite"} className={tab === "rewrite" ? "on" : ""} onClick={() => setTab("rewrite")}>Rewrite with AI</button>
-      </div>
-
-      {tab === "rewrite" ? (
-        <Rewrite me={me} file={file} jd={jd} onUpgraded={setMe} />
+      {level === "fresher" ? (
+        <Rewrite key="fresher" me={me} file={null} jd={jd} mode="fresher" onUpgraded={setMe} />
       ) : (<>
         {error && <div className="err" role="alert">{error.message}<small>Reference: {error.ref}</small></div>}
         {outOfScans && <div className="err">You have used all 3 free scans this month. Upgrade to Pro for unlimited scans — use the Go Pro button above.</div>}
-        <button onClick={analyze} disabled={busy || !!outOfScans}>{busy ? "Analyzing…" : "Analyze now"}</button>
+        <button onClick={analyze} disabled={busy || !!outOfScans}>{busy ? "Analyzing…" : "Score my resume"}</button>
 
         {result && (
           <div className="card" style={{ marginTop: 16 }} aria-live="polite">
@@ -143,6 +145,9 @@ export default function Dashboard() {
             <ol className="sugs">{result.suggestions.map((s, i) => <li key={i}>{s}</li>)}</ol>
           </div>
         )}
+
+        <h2 style={{ marginTop: 24 }}>Improve it</h2>
+        <Rewrite key="existing" me={me} file={file} jd={jd} mode="existing" onUpgraded={setMe} />
       </>)}
     </>
   );
