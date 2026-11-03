@@ -31,7 +31,9 @@ def verify_token(token: str) -> dict:
     if r.status_code != 200:
         raise HTTPException(401, {"message": "Please sign in again.", "ref": "auth-invalid"})
     u = r.json()
-    user = {"id": u.get("id"), "email": u.get("email")}
+    meta = u.get("user_metadata") or {}
+    user = {"id": u.get("id"), "email": u.get("email"),
+            "full_name": (meta.get("full_name") or "").strip(), "mobile": (meta.get("mobile") or "").strip()}
     if not user["id"]:
         raise HTTPException(401, {"message": "Please sign in again.", "ref": "auth-invalid"})
     if len(_TOKEN_CACHE) > 5000:
@@ -96,3 +98,29 @@ def record_scan(profile: dict) -> int:
     if r.status_code in (200, 201) and r.json():
         return used + 1
     return used
+
+
+def sync_profile_details(user: dict, profile: dict | None) -> dict | None:
+    """Copies the name, email and mobile given at sign-up (kept by Supabase with the login) onto the
+    profile, filling only blanks. Runs for the signed-in user only, using details Supabase itself holds,
+    so nobody can write details for someone else. Creates the profile row if it is missing."""
+    want = {"email": user.get("email"), "full_name": user.get("full_name"), "phone": user.get("mobile")}
+    want = {k: v for k, v in want.items() if v}
+    if profile is None:
+        base = {"id": user["id"], "plan": "free", "scans_used": 0, **want}
+        r = requests.post(f"{config.SUPABASE_URL}/rest/v1/profiles",
+                          headers={**_service_headers(), "Prefer": "return=representation,resolution=merge-duplicates"},
+                          json=base, timeout=10)
+        if r.status_code in (200, 201) and r.json():
+            return r.json()[0]
+        print(f"[profile] could not create profile (HTTP {r.status_code})")
+        return None
+    fill = {k: v for k, v in want.items() if not (profile.get(k) or "").strip()}
+    if fill:
+        r = requests.patch(f"{config.SUPABASE_URL}/rest/v1/profiles", params={"id": f"eq.{user['id']}"},
+                           headers={**_service_headers(), "Prefer": "return=minimal"}, json=fill, timeout=10)
+        if r.status_code in (200, 204):
+            profile = {**profile, **fill}
+        else:
+            print(f"[profile] could not fill details (HTTP {r.status_code})")
+    return profile

@@ -1,0 +1,48 @@
+:root { --bg:#0e0e0e; --card:#1a1a1a; --line:#2a2a2a; --text:#fff; --muted:#9a9a9a; --amber:#f59e0b; --ink:#1a1a1a; --good:#22c55e; --bad:#f87171; }
+* { box-sizing: border-box; }
+html, body { margin:0; background:var(--bg); color:var(--text); font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-text-size-adjust:100%; }
+.wrap { max-width: 880px; margin: 0 auto; padding: 16px; }
+header.top { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 0 16px; border-bottom:1px solid var(--line); margin-bottom:20px; }
+.brand { display:flex; align-items:center; gap:10px; font-weight:800; font-size:20px; }
+.brand .mark { background:var(--amber); color:var(--ink); border-radius:8px; width:34px; height:34px; display:grid; place-items:center; font-weight:900; font-size:14px; }
+.brand b { color:var(--amber); }
+h1 { font-size: clamp(28px, 6vw, 44px); line-height:1.05; margin:0 0 10px; letter-spacing:-1px; }
+h1 em { color:var(--amber); font-style:normal; }
+h2 { font-size:12px; letter-spacing:.12em; text-transform:uppercase; margin:22px 0 8px; }
+p.muted, .muted { color:var(--muted); }
+.card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; }
+label { display:block; font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; margin:14px 0 6px; }
+input[type=text], input[type=email], input[type=password], input[type=tel], textarea {
+  width:100%; background:#111; color:var(--text); border:1px solid var(--line); border-radius:10px; padding:12px 14px; font:inherit; font-size:16px; }
+textarea { min-height:180px; resize:vertical; }
+input:focus, textarea:focus, button:focus-visible { outline:2px solid var(--amber); outline-offset:1px; }
+button, .btn { display:block; font:inherit; font-weight:800; font-size:14px; letter-spacing:.06em; text-transform:uppercase; border-radius:10px; padding:14px 20px; min-height:48px; cursor:pointer; border:1px solid var(--amber); background:var(--amber); color:var(--ink); width:100%; text-align:center; }
+button.ghost { background:transparent; color:var(--amber); }
+button.link { background:none; border:none; color:var(--amber); padding:8px 0; min-height:44px; text-transform:none; letter-spacing:0; font-weight:600; width:auto; text-decoration:underline; }
+button:disabled { opacity:.55; cursor:not-allowed; }
+.row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+.row > * { flex:1 1 auto; }
+.pill { display:inline-block; font-size:11px; font-weight:800; letter-spacing:.08em; padding:3px 8px; border-radius:6px; border:1px solid var(--good); color:var(--good); background:rgba(34,197,94,.1); }
+.err { background:#2a1010; border:1px solid #5a2020; color:#fca5a5; border-radius:10px; padding:12px 14px; margin:12px 0; font-size:14px; }
+.err small { display:block; opacity:.7; margin-top:4px; }
+.ok { background:#0f2a18; border:1px solid #1d5a33; color:#86efac; border-radius:10px; padding:12px 14px; margin:12px 0; font-size:14px; }
+.drop { display:block; border:1px dashed #444; border-radius:12px; padding:18px; text-align:center; cursor:pointer; background:#111; }
+.drop input { display:none; }
+.drop .btn { margin-top:10px; }
+.drop .muted { display:block; }
+.file { display:flex; justify-content:space-between; align-items:center; gap:12px; background:#fff; color:#111; border-radius:10px; padding:10px 14px; margin-bottom:10px; word-break:break-all; }
+.file button { width:auto; min-height:40px; padding:8px 14px; }
+.score { text-align:center; padding:8px 0 4px; }
+.score .num { font-size:72px; font-weight:900; line-height:1; }
+.bar { height:8px; border-radius:99px; background:#2a2a2a; overflow:hidden; margin:12px auto; max-width:360px; }
+.bar > i { display:block; height:100%; }
+.kw { display:flex; flex-wrap:wrap; gap:8px; }
+.kw span { font-size:13px; padding:5px 10px; border-radius:999px; border:1px solid var(--line); }
+.kw .m { color:var(--good); border-color:rgba(34,197,94,.4); }
+.kw .x { color:var(--bad); border-color:rgba(248,113,113,.4); }
+ol.sugs { padding-left:20px; line-height:1.55; }
+.tabs { display:flex; gap:8px; margin:18px 0 8px; }
+.tabs button { background:transparent; color:var(--muted); border-color:var(--line); }
+.tabs button.on { color:var(--ink); background:var(--amber); border-color:var(--amber); }
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+@media (max-width: 720px) { .grid2 { grid-template-columns:1fr; } .wrap { padding:12px; } }

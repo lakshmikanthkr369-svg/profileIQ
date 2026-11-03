@@ -70,11 +70,12 @@ def health():
 
 @app.get("/v1/me")
 def me(user: dict = Depends(auth.current_user)):
-    profile = auth.get_profile(user["id"])
+    profile = auth.sync_profile_details(user, auth.get_profile(user["id"]))
     if profile:
         profile = auth.reset_scans_if_needed(profile)
     pro = auth.is_pro(profile)
-    return {"id": user["id"], "email": user["email"], "is_pro": pro,
+    return {"id": user["id"], "email": user["email"], "full_name": (profile or {}).get("full_name") or user.get("full_name"),
+            "is_pro": pro,
             "scans_left": None if pro else auth.free_scans_left(profile),
             "pro_expires_at": (profile or {}).get("pro_expires_at") if pro else None}
 

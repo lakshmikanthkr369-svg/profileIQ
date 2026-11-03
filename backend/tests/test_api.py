@@ -16,6 +16,7 @@ def client(monkeypatch):
     state = {"profile": {"id": "u1", "plan": "free", "scans_used": 0}, "recorded": 0}
     monkeypatch.setattr(auth, "get_profile", lambda uid: dict(state["profile"]))
     monkeypatch.setattr(auth, "reset_scans_if_needed", lambda p: p)
+    monkeypatch.setattr(auth, "sync_profile_details", lambda u, p: p)
 
     def rec(p):
         state["recorded"] += 1
@@ -152,3 +153,23 @@ def test_cors_blocks_other_origins(client):
     bad = client.options("/v1/me", headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "GET"})
     assert ok.headers.get("access-control-allow-origin") == "https://app.profileiq.co.in"
     assert "access-control-allow-origin" not in bad.headers
+
+
+class _Resp:
+    def __init__(self, status=200, body=None): self.status_code, self._b = status, body or []
+    def json(self): return self._b
+
+
+def test_sync_fills_only_blanks_and_for_own_user(monkeypatch):
+    calls = []
+    monkeypatch.setattr(auth.requests, "patch", lambda url, **kw: calls.append(kw) or _Resp(204))
+    user = {"id": "u1", "email": "a@b.com", "full_name": "Asha K", "mobile": "+919876543210"}
+    out = auth.sync_profile_details(user, {"id": "u1", "email": "a@b.com", "full_name": "Existing", "phone": ""})
+    assert calls[0]["json"] == {"phone": "+919876543210"}          # name kept, blank phone filled
+    assert calls[0]["params"]["id"] == "eq.u1" and out["phone"] == "+919876543210" and out["full_name"] == "Existing"
+
+
+def test_sync_creates_missing_profile(monkeypatch):
+    monkeypatch.setattr(auth.requests, "post", lambda url, **kw: _Resp(201, [dict(kw["json"])]))
+    out = auth.sync_profile_details({"id": "u9", "email": "n@x.com", "full_name": "N", "mobile": ""}, None)
+    assert out["id"] == "u9" and out["plan"] == "free" and out["full_name"] == "N" and "phone" not in out
