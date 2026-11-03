@@ -108,7 +108,8 @@ def sb_headers(token=None, use_anon=False):
     h = {"apikey": key, "Content-Type": "application/json"}
     if token:
         h["Authorization"] = f"Bearer {token}"
-    else:
+    elif not str(key).startswith("sb_"):
+        # legacy JWT keys also go in Authorization; new sb_secret_/sb_publishable_ keys are apikey-only
         h["Authorization"] = f"Bearer {key}"
     return h
 
