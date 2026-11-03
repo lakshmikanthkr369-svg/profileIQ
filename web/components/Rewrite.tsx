@@ -67,23 +67,24 @@ export default function Rewrite({ me, file, jd, onUpgraded }: Props) {
   const set = (k: keyof FresherProfile) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setFresher((f) => ({ ...f, [k]: e.target.value }));
 
-  if (me && !me.is_pro) {
-    return (
-      <div className="card"><strong>Rewrite with AI is a Pro feature.</strong>
-        <p className="muted">Upgrade to Pro to get an ATS-optimised rewrite, four resume formats and PDF/Word downloads.</p>
-        <Upgrade me={me} onUpgraded={onUpgraded} /></div>
-    );
-  }
+  const locked = !!me && !me.is_pro;
 
   return (
     <>
+      {locked && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <strong>Rewrite with AI is a Pro feature.</strong>
+          <p className="muted" style={{ margin: "6px 0 12px" }}>Upgrade to Pro to get an ATS-optimised rewrite, four resume formats and PDF/Word downloads — for experienced professionals and freshers alike.</p>
+          <Upgrade me={me} onUpgraded={onUpgraded} />
+        </div>
+      )}
       <div className="tabs" role="tablist" style={{ marginTop: 0 }}>
-        <button className={mode === "existing" ? "on" : ""} onClick={() => setMode("existing")}>I have a resume</button>
+        <button className={mode === "existing" ? "on" : ""} onClick={() => setMode("existing")}>I'm experienced — I have a resume</button>
         <button className={mode === "fresher" ? "on" : ""} onClick={() => setMode("fresher")}>I&apos;m a fresher</button>
       </div>
 
       {mode === "existing" ? (
-        <button onClick={runRewrite} disabled={!!busy}>{busy && !data ? "Working…" : "Rewrite my resume"}</button>
+        <button onClick={runRewrite} disabled={!!busy || locked}>{busy && !data ? "Working…" : locked ? "Rewrite my resume (Pro)" : "Rewrite my resume"}</button>
       ) : (
         <div className="card">
           <p className="muted" style={{ marginTop: 0 }}>No resume yet? Tell us about yourself and we&apos;ll build one for this job.</p>
@@ -114,7 +115,7 @@ export default function Rewrite({ me, file, jd, onUpgraded }: Props) {
           ))}
           <button className="ghost" onClick={() => setFresher((f) => ({ ...f, certifications: [...f.certifications, { name: "" }] }))}>+ Add certification</button>
           <div style={{ height: 12 }} />
-          <button onClick={runFresher} disabled={!!busy}>Build my resume</button>
+          <button onClick={runFresher} disabled={!!busy || locked}>{locked ? "Build my resume (Pro)" : "Build my resume"}</button>
         </div>
       )}
 
