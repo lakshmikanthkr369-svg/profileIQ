@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Upgrade from "./Upgrade";
 import {
   ApiError, buildFresher, downloadResume, getTemplates, previewResume, rewriteResume,
   type FresherProfile, type Me, type ResumeData,
@@ -10,10 +11,10 @@ const EMPTY: FresherProfile = {
   key_skills: "", projects: [{ name: "", description: "" }], certifications: [],
 };
 
-interface Props { me: Me | null; file: File | null; jd: string }
+interface Props { me: Me | null; file: File | null; jd: string; onUpgraded: (m: Me) => void }
 type Err = { message: string; ref: string } | null;
 
-export default function Rewrite({ me, file, jd }: Props) {
+export default function Rewrite({ me, file, jd, onUpgraded }: Props) {
   const [mode, setMode] = useState<"existing" | "fresher">("existing");
   const [templates, setTemplates] = useState<string[]>([]);
   const [template, setTemplate] = useState("Bold");
@@ -69,7 +70,8 @@ export default function Rewrite({ me, file, jd }: Props) {
   if (me && !me.is_pro) {
     return (
       <div className="card"><strong>Rewrite with AI is a Pro feature.</strong>
-        <p className="muted">Upgrade to Pro to get an ATS-optimised rewrite, four resume formats and PDF/Word downloads.</p></div>
+        <p className="muted">Upgrade to Pro to get an ATS-optimised rewrite, four resume formats and PDF/Word downloads.</p>
+        <Upgrade me={me} onUpgraded={onUpgraded} /></div>
     );
   }
 

@@ -29,7 +29,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export interface Me { id: string; email: string; full_name?: string | null; is_pro: boolean; scans_left: number | null; pro_expires_at: string | null }
+export interface Me { id: string; email: string; full_name?: string | null; is_pro: boolean; scans_left: number | null; pro_expires_at: string | null; cancels_at_period_end?: boolean; has_mobile?: boolean }
 export interface ScoreResult { score: number; matched: string[]; missing: string[]; suggestions: string[]; scans_left: number | null }
 
 export const getMe = () => api<Me>("/v1/me");
@@ -84,3 +84,10 @@ export async function downloadResume(data: ResumeData, template: string, format:
   a.href = url; a.download = `ProfileIQ_Resume.${format}`; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
+
+export interface Subscribe { subscription_id: string; key_id: string; email: string; contact: string }
+const post = <T>(path: string, body?: unknown) =>
+  api<T>(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
+export const startSubscription = (mobile?: string) => post<Subscribe>("/v1/billing/subscribe", { mobile: mobile || null });
+export const confirmSubscription = (subscription_id: string) => post<{ status: "paid" | "pending" | "not_paid" }>("/v1/billing/confirm", { subscription_id });
+export const cancelSubscription = () => post<{ ok: boolean }>("/v1/billing/cancel");

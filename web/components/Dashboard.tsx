@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { ApiError, getMe, scoreResume, type Me, type ScoreResult } from "@/lib/api";
+import { ApiError, cancelSubscription, getMe, scoreResume, type Me, type ScoreResult } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import Rewrite from "./Rewrite";
+import Upgrade from "./Upgrade";
 
 const MAX_MB = 10;
 
@@ -16,6 +17,8 @@ export default function Dashboard() {
   const [result, setResult] = useState<ScoreResult | null>(null);
   const [tab, setTab] = useState<"score" | "rewrite">("score");
   const picker = useRef<HTMLInputElement>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelErr, setCancelErr] = useState("");
 
   useEffect(() => {
     getMe().then(setMe).catch((e: ApiError) => setMeError(e.message));
@@ -59,6 +62,30 @@ export default function Dashboard() {
         <button className="ghost" style={{ flex: "0 0 auto", width: "auto" }} onClick={() => supabase.auth.signOut()}>Sign out</button>
       </div>
       {meError && <div className="err" role="alert">{meError}</div>}
+      {me && !me.is_pro && (
+        <div className="card" style={{ margin: "12px 0" }}>
+          <strong>Go Pro</strong>
+          <p className="muted" style={{ margin: "6px 0 12px" }}>Unlimited scans, AI rewrite, fresher resume builder, 4 formats and PDF/Word downloads. Cancel any time.</p>
+          <Upgrade me={me} onUpgraded={setMe} />
+        </div>
+      )}
+      {me?.is_pro && me.pro_expires_at && (
+        <p className="muted" style={{ fontSize: 12 }}>
+          {me.cancels_at_period_end ? "Pro ends on " : "Pro renews on "}{new Date(me.pro_expires_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+          {!me.cancels_at_period_end && !confirmCancel && <> · <a href="#cancel" onClick={(e) => { e.preventDefault(); setConfirmCancel(true); }}>Cancel plan</a></>}
+        </p>
+      )}
+      {confirmCancel && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <strong>Cancel your Pro plan?</strong>
+          <p className="muted">You keep Pro until the end of the period you&apos;ve paid for. It won&apos;t renew after that.</p>
+          <div className="row">
+            <button onClick={async () => { setCancelErr(""); try { await cancelSubscription(); setMe(await getMe()); setConfirmCancel(false); } catch (e) { setCancelErr((e as ApiError).message); } }}>Yes, cancel at period end</button>
+            <button className="ghost" onClick={() => setConfirmCancel(false)}>Keep Pro</button>
+          </div>
+          {cancelErr && <div className="err" role="alert">{cancelErr}</div>}
+        </div>
+      )}
 
       <div className="grid2" style={{ marginTop: 12 }}>
         <div>
@@ -85,10 +112,10 @@ export default function Dashboard() {
       </div>
 
       {tab === "rewrite" ? (
-        <Rewrite me={me} file={file} jd={jd} />
+        <Rewrite me={me} file={file} jd={jd} onUpgraded={setMe} />
       ) : (<>
         {error && <div className="err" role="alert">{error.message}<small>Reference: {error.ref}</small></div>}
-        {outOfScans && <div className="err">You have used all 3 free scans this month. Upgrade to Pro for unlimited scans.</div>}
+        {outOfScans && <div className="err">You have used all 3 free scans this month. Upgrade to Pro for unlimited scans — use the Go Pro button above.</div>}
         <button onClick={analyze} disabled={busy || !!outOfScans}>{busy ? "Analyzing…" : "Analyze now"}</button>
 
         {result && (

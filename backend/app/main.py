@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from . import auth, config
+from . import auth, billing, config
 from .ai import build_fresher_resume, do_rewrite, get_suggestions, score_resume
 from .ai_errors import describe_ai_error
 from .limits import check_ai_rate
@@ -77,7 +77,9 @@ def me(user: dict = Depends(auth.current_user)):
     return {"id": user["id"], "email": user["email"], "full_name": (profile or {}).get("full_name") or user.get("full_name"),
             "is_pro": pro,
             "scans_left": None if pro else auth.free_scans_left(profile),
-            "pro_expires_at": (profile or {}).get("pro_expires_at") if pro else None}
+            "pro_expires_at": (profile or {}).get("pro_expires_at") if pro else None,
+            "cancels_at_period_end": pro and (profile or {}).get("subscription_status") == "cancel_at_cycle_end",
+            "has_mobile": bool(billing.normalize_mobile((profile or {}).get("phone")))}
 
 
 @app.get("/v1/templates")
@@ -204,3 +206,29 @@ def resume_preview(body: FileIn, user: dict = Depends(auth.current_user)):
         raise
     except Exception as e:  # noqa: BLE001
         raise _fail(e)
+
+
+class SubscribeIn(BaseModel):
+    mobile: str | None = None
+
+
+class ReconcileIn(BaseModel):
+    subscription_id: str
+
+
+@app.post("/v1/billing/subscribe")
+def subscribe(body: SubscribeIn, user: dict = Depends(auth.current_user)):
+    return billing.create_subscription(user, auth.get_profile(user["id"]), body.mobile)
+
+
+@app.post("/v1/billing/confirm")
+def confirm(body: ReconcileIn, user: dict = Depends(auth.current_user)):
+    if not body.subscription_id.startswith("sub_") or len(body.subscription_id) > 40:
+        raise HTTPException(422, {"message": "Invalid subscription.", "ref": "bad-sub"})
+    return {"status": billing.reconcile(user, body.subscription_id)}
+
+
+@app.post("/v1/billing/cancel")
+def cancel(user: dict = Depends(auth.current_user)):
+    billing.cancel(user, auth.get_profile(user["id"]))
+    return {"ok": True}

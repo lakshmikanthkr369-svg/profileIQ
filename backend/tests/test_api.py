@@ -173,3 +173,65 @@ def test_sync_creates_missing_profile(monkeypatch):
     monkeypatch.setattr(auth.requests, "post", lambda url, **kw: _Resp(201, [dict(kw["json"])]))
     out = auth.sync_profile_details({"id": "u9", "email": "n@x.com", "full_name": "N", "mobile": ""}, None)
     assert out["id"] == "u9" and out["plan"] == "free" and out["full_name"] == "N" and "phone" not in out
+
+
+# ── billing ──
+def _fake_rzp(monkeypatch, sub=None):
+    from app import billing
+    calls = []
+    monkeypatch.setattr(billing.config, "RAZORPAY_KEY_ID", "rzp_test_x")
+    monkeypatch.setattr(billing.config, "RAZORPAY_KEY_SECRET", "s")
+    monkeypatch.setattr(billing.config, "RAZORPAY_PLAN_ID", "plan_x")
+    monkeypatch.setattr(billing, "_patch_profile", lambda uid, f: calls.append(("patch", f)))
+
+    def rzp(method, path, **kw):
+        calls.append((method, path, kw))
+        if method == "POST" and path == "/subscriptions":
+            return {"id": "sub_123"}
+        return sub or {}
+    monkeypatch.setattr(billing, "_rzp", rzp)
+    return calls
+
+
+def test_subscribe_needs_valid_mobile(client, monkeypatch):
+    _fake_rzp(monkeypatch)
+    r = client.post("/v1/billing/subscribe", json={"mobile": "12345"})
+    assert r.status_code == 422 and r.json()["ref"] == "bad-mobile"
+
+
+def test_subscribe_creates_with_user_id_in_notes(client, monkeypatch):
+    calls = _fake_rzp(monkeypatch)
+    r = client.post("/v1/billing/subscribe", json={"mobile": "098765 43210"})
+    assert r.status_code == 200 and r.json()["subscription_id"] == "sub_123" and r.json()["contact"] == "9876543210"
+    assert "key_secret" not in r.text and "secret" not in r.text.lower()
+    created = [c for c in calls if c[0] == "POST"][0][2]["json"]
+    assert created["notes"]["user_id"] == "u1" and created["plan_id"] == "plan_x"
+
+
+def test_subscribe_refused_when_already_pro(client, monkeypatch):
+    _fake_rzp(monkeypatch)
+    client.state["profile"].update(plan="pro", pro_expires_at=FUTURE)
+    assert client.post("/v1/billing/subscribe", json={"mobile": "9876543210"}).status_code == 409
+
+
+def test_confirm_marks_pro_only_for_own_subscription(client, monkeypatch):
+    calls = _fake_rzp(monkeypatch, {"status": "active", "current_end": 4102444800, "customer_id": "cust_1", "notes": {"user_id": "u1"}})
+    r = client.post("/v1/billing/confirm", json={"subscription_id": "sub_123"})
+    assert r.json() == {"status": "paid"} and any(c[0] == "patch" and c[1]["plan"] == "pro" for c in calls)
+    calls2 = _fake_rzp(monkeypatch, {"status": "active", "notes": {"user_id": "someone-else"}})
+    assert client.post("/v1/billing/confirm", json={"subscription_id": "sub_123"}).status_code == 403
+    assert not any(c[0] == "patch" for c in calls2)
+
+
+def test_confirm_pending_and_bad_id(client, monkeypatch):
+    _fake_rzp(monkeypatch, {"status": "created", "notes": {"user_id": "u1"}})
+    assert client.post("/v1/billing/confirm", json={"subscription_id": "sub_123"}).json() == {"status": "pending"}
+    assert client.post("/v1/billing/confirm", json={"subscription_id": "../x"}).status_code == 422
+
+
+def test_cancel_requires_active_subscription(client, monkeypatch):
+    calls = _fake_rzp(monkeypatch)
+    assert client.post("/v1/billing/cancel").status_code == 409
+    client.state["profile"].update(plan="pro", pro_expires_at=FUTURE, razorpay_subscription_id="sub_123")
+    assert client.post("/v1/billing/cancel").status_code == 200
+    assert any(c[0] == "POST" and c[1] == "/subscriptions/sub_123/cancel" for c in calls)
