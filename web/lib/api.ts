@@ -29,7 +29,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export interface Me { id: string; email: string; full_name?: string | null; is_pro: boolean; scans_left: number | null; pro_expires_at: string | null; cancels_at_period_end?: boolean; has_billing?: boolean; has_mobile?: boolean }
+export interface Me { id: string; email: string; full_name?: string | null; is_pro: boolean; scans_left: number | null; pro_expires_at: string | null; cancels_at_period_end?: boolean; has_billing?: boolean; plan_ended_on?: string | null; has_mobile?: boolean }
 export interface ScoreResult { score: number; matched: string[]; missing: string[]; suggestions: string[]; scans_left: number | null }
 
 export const getMe = () => api<Me>("/v1/me");

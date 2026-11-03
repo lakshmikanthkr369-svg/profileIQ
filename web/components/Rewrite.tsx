@@ -81,7 +81,7 @@ export default function Rewrite({ me, file, jd, mode, onUpgraded }: Props) {
       )}
 
       {mode === "existing" ? (
-        <button onClick={runRewrite} disabled={!!busy}>{busy && !data ? "Working…" : "Rewrite my resume with AI"}{locked ? " (Pro)" : ""}</button>
+        <button onClick={runRewrite} aria-busy={!!busy} disabled={!!busy}>{busy && !data ? "Working…" : "Rewrite my resume with AI"}{locked ? " (Pro)" : ""}</button>
       ) : (
         <div className="card">
           <p className="muted" style={{ marginTop: 0 }}>Fresher? Fill in your details and we&apos;ll write your resume for this job.</p>
@@ -112,7 +112,7 @@ export default function Rewrite({ me, file, jd, mode, onUpgraded }: Props) {
           ))}
           <button className="ghost" onClick={() => setFresher((f) => ({ ...f, certifications: [...f.certifications, { name: "" }] }))}>+ Add certification</button>
           <div style={{ height: 12 }} />
-          <button onClick={runFresher} disabled={!!busy}>{busy && !data ? "Working…" : "Write my resume"}{locked ? " (Pro)" : ""}</button>
+          <button onClick={runFresher} aria-busy={!!busy} disabled={!!busy}>{busy && !data ? "Working…" : "Write my resume"}{locked ? " (Pro)" : ""}</button>
         </div>
       )}
 
@@ -131,8 +131,8 @@ export default function Rewrite({ me, file, jd, mode, onUpgraded }: Props) {
           {html && <iframe title="Resume preview" sandbox="" srcDoc={html}
             style={{ width: "100%", height: 560, border: "1px solid var(--line)", borderRadius: 10, background: "#fff" }} />}
           <div className="row" style={{ marginTop: 12 }}>
-            <button onClick={() => download("pdf")} disabled={!!busy}>Download PDF</button>
-            <button onClick={() => download("docx")} disabled={!!busy}>Download Word</button>
+            <button onClick={() => download("pdf")} aria-busy={!!busy} disabled={!!busy}>Download PDF</button>
+            <button onClick={() => download("docx")} aria-busy={!!busy} disabled={!!busy}>Download Word</button>
           </div>
         </div>
       )}

@@ -93,7 +93,7 @@ export default function Upgrade({ me, onUpgraded, label = "Upgrade to Pro — �
             onChange={(e) => setMobile(e.target.value)} placeholder="10-digit mobile, e.g. 98765 43210" />
         </div>
       )}
-      <button onClick={begin} disabled={busy} style={compact ? { width: "auto" } : undefined}>
+      <button onClick={begin} aria-busy={busy} disabled={busy} style={compact ? { width: "auto" } : undefined}>
         {busy ? "Please wait…" : label}
       </button>
       {msg && <p className="muted" aria-live="polite">{msg}</p>}

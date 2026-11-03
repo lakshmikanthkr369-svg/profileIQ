@@ -57,3 +57,12 @@ select { width:100%; background:#111; color:var(--text); border:1px solid var(--
 .topbar .who { flex:1 1 220px; min-width:0; overflow-wrap:anywhere; }
 .topbar .actions { display:flex; flex-wrap:wrap; gap:8px; }
 .topbar .actions button { width:auto; min-height:40px; padding:8px 14px; }
+
+/* Loader on any button that is working */
+@keyframes piqspin { to { transform: rotate(360deg); } }
+button[aria-busy="true"]::after { content:""; display:inline-block; width:14px; height:14px; margin-left:10px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:piqspin .7s linear infinite; vertical-align:-2px; }
+button[aria-busy="true"] { cursor:progress; }
+.notice { border-radius:12px; padding:14px 16px; margin:12px 0; font-size:15px; line-height:1.45; }
+.notice strong { display:block; font-size:16px; margin-bottom:2px; }
+.notice.warn { background:#2a2008; border:1px solid #6b4e0a; color:#fcd34d; }
+.notice.bad { background:#2a1010; border:1px solid #5a2020; color:#fca5a5; }

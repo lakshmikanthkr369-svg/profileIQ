@@ -319,3 +319,12 @@ def test_service_headers_support_new_and_legacy_keys(monkeypatch):
     monkeypatch.setattr(auth.config, "SUPABASE_SERVICE_KEY", "sb_secret_abc")
     h = auth._service_headers()
     assert h["apikey"] == "sb_secret_abc" and "Authorization" not in h
+
+
+def test_me_reports_ended_plan_and_cancel_state(client):
+    client.state["profile"].update(plan="pro", pro_expires_at="2020-01-01T00:00:00+00:00", razorpay_subscription_id="sub_1")
+    d = client.get("/v1/me").json()
+    assert d["is_pro"] is False and d["plan_ended_on"] == "2020-01-01T00:00:00+00:00"
+    client.state["profile"].update(pro_expires_at=FUTURE, subscription_status="cancel_at_cycle_end")
+    d = client.get("/v1/me").json()
+    assert d["is_pro"] is True and d["cancels_at_period_end"] is True and d["plan_ended_on"] is None

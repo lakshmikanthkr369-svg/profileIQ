@@ -34,7 +34,7 @@ export function Invoices() {
               <strong>{i.invoice_number}</strong>
               <div className="muted" style={{ fontSize: 12 }}>{day(i.issued_at)} · {method(i.payment_method)} · {rupees(i.amount_paise, i.currency)}</div>
             </div>
-            <button className="ghost" style={{ width: "auto", flex: "0 0 auto" }} disabled={busy === i.id} onClick={() => send(i.id)}>
+            <button className="ghost" style={{ width: "auto", flex: "0 0 auto" }} aria-busy={busy === i.id} disabled={busy === i.id} onClick={() => send(i.id)}>
               {busy === i.id ? "Sending…" : i.emailed_at ? "Email me again" : "Send to my email"}
             </button>
           </div>
@@ -76,7 +76,7 @@ export function Support({ me, onClose }: { me: Me | null; onClose: () => void })
         <textarea id="sup-msg" style={{ minHeight: 120 }} value={message} maxLength={4000} onChange={(e) => setMessage(e.target.value)} placeholder="Tell us what's on your mind…" />
         {err && <div className="err" role="alert">{err.message}<small>Reference: {err.ref}</small></div>}
         <div className="row" style={{ marginTop: 12 }}>
-          <button onClick={submit} disabled={busy}>{busy ? "Sending…" : "Submit"}</button>
+          <button onClick={submit} aria-busy={busy} disabled={busy}>{busy ? "Sending…" : "Submit"}</button>
           <button className="ghost" onClick={onClose}>Cancel</button>
         </div>
       </>)}
@@ -87,13 +87,14 @@ export function Support({ me, onClose }: { me: Me | null; onClose: () => void })
 export function Subscription({ me, onChanged }: { me: Me | null; onChanged: (m: Me) => void }) {
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
   const [err, setErr] = useState<{ message: string; ref: string } | null>(null);
   if (!me) return null;
   const end = me.pro_expires_at ? day(me.pro_expires_at) : "";
 
   async function cancel() {
     setBusy(true); setErr(null);
-    try { await cancelSubscription(); onChanged(await getMe()); setConfirm(false); }
+    try { await cancelSubscription(); onChanged(await getMe()); setConfirm(false); setDone(true); }
     catch (e) { const x = e as ApiError; setErr({ message: x.message, ref: x.ref }); }
     finally { setBusy(false); }
   }
@@ -104,7 +105,7 @@ export function Subscription({ me, onChanged }: { me: Me | null; onChanged: (m: 
       {!me.is_pro ? (
         <p className="muted">You&apos;re on the Free plan. Use the Go Pro button to upgrade.</p>
       ) : me.cancels_at_period_end ? (
-        <p className="muted">Your Pro plan is cancelled. You keep Pro until <strong style={{ color: "var(--text)" }}>{end}</strong> and it won&apos;t renew.</p>
+        <div className={done ? "ok" : "notice warn"} role="status"><strong>{done ? "Subscription cancelled" : "Your subscription is cancelled"}</strong>You keep Pro until {end}. It won&apos;t renew after that.</div>
       ) : (<>
         <p className="muted">ProfileIQ Pro — ₹199/month. {end && <>Renews on <strong style={{ color: "var(--text)" }}>{end}</strong>.</>}</p>
         {!confirm ? (
@@ -113,7 +114,7 @@ export function Subscription({ me, onChanged }: { me: Me | null; onChanged: (m: 
           <div>
             <p className="muted">You&apos;ll keep Pro until the end of the period you&apos;ve paid for. It won&apos;t renew after that.</p>
             <div className="row">
-              <button onClick={cancel} disabled={busy}>{busy ? "Cancelling…" : "Yes, cancel at period end"}</button>
+              <button onClick={cancel} aria-busy={busy} disabled={busy}>{busy ? "Cancelling…" : "Yes, cancel at period end"}</button>
               <button className="ghost" onClick={() => setConfirm(false)} disabled={busy}>Keep Pro</button>
             </div>
           </div>

@@ -103,7 +103,7 @@ export default function AuthForm() {
       {error && <div className="err" role="alert">{error}</div>}
       {notice && <div className="ok" role="status">{notice}</div>}
       <div style={{ height: 16 }} />
-      <button type="submit" disabled={busy}>{busy ? "Please wait…" : mode === "login" ? "Log in" : mode === "signup" ? "Sign up" : "Send reset link"}</button>
+      <button type="submit" aria-busy={busy} disabled={busy}>{busy ? "Please wait…" : mode === "login" ? "Log in" : mode === "signup" ? "Sign up" : "Send reset link"}</button>
       <div className="row" style={{ marginTop: 10 }}>
         {mode !== "login" && <button type="button" className="link" onClick={() => { setMode("login"); setError(""); setNotice(""); }}>Back to log in</button>}
         {mode === "login" && <button type="button" className="link" onClick={() => { setMode("signup"); setError(""); setNotice(""); }}>Create an account</button>}

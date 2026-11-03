@@ -104,6 +104,14 @@ export default function Dashboard() {
         </div>
       </div>
       {payNote && <div className="ok" role="status">{payNote}</div>}
+      {me?.is_pro && me.cancels_at_period_end && me.pro_expires_at && (
+        <div className="notice warn" role="status"><strong>Your subscription is cancelled</strong>
+          You still have Pro until {new Date(me.pro_expires_at).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}. It won&apos;t renew after that.</div>
+      )}
+      {me && !me.is_pro && me.plan_ended_on && (
+        <div className="notice bad" role="status"><strong>Your Pro subscription has ended</strong>
+          It ended on {new Date(me.plan_ended_on).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}. Upgrade to get Pro features back.</div>
+      )}
       {panel === "billing" && (<><Subscription me={me} onChanged={setMe} /><Invoices /></>)}
       {panel === "support" && <Support me={me} onClose={() => setPanel("")} />}
       {meError && <div className="err" role="alert">{meError}</div>}
@@ -145,7 +153,7 @@ export default function Dashboard() {
       ) : (<>
         {error && <div className="err" role="alert">{error.message}<small>Reference: {error.ref}</small></div>}
         {outOfScans && <div className="err">You have used all 3 free scans this month. Upgrade to Pro for unlimited scans — use the Go Pro button above.</div>}
-        <button onClick={analyze} disabled={busy || !!outOfScans}>{busy ? "Analyzing…" : "Score my resume"}</button>
+        <button onClick={analyze} aria-busy={busy} disabled={busy || !!outOfScans}>{busy ? "Analyzing…" : "Score my resume"}</button>
 
         {result && (
           <div className="card" style={{ marginTop: 16 }} aria-live="polite">

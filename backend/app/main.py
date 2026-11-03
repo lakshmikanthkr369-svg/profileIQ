@@ -90,6 +90,7 @@ def me(user: dict = Depends(auth.current_user)):
             "is_pro": pro,
             "scans_left": None if pro else auth.free_scans_left(profile),
             "pro_expires_at": (profile or {}).get("pro_expires_at") if pro else None,
+            "plan_ended_on": None if pro else (profile or {}).get("pro_expires_at") if (profile or {}).get("razorpay_subscription_id") else None,
             "cancels_at_period_end": pro and (profile or {}).get("subscription_status") == "cancel_at_cycle_end",
             "has_billing": pro or bool((profile or {}).get("razorpay_subscription_id")),
             "has_mobile": bool(billing.normalize_mobile((profile or {}).get("phone")))}
