@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { ApiError, emailInvoice, listInvoices, sendSupport, type Invoice, type Me } from "@/lib/api";
+import { ApiError, cancelSubscription, emailInvoice, getMe, listInvoices, sendSupport, type Invoice, type Me } from "@/lib/api";
 
 const rupees = (paise: number, cur: string) => `${cur === "INR" ? "₹" : cur + " "}${(paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
@@ -80,6 +80,46 @@ export function Support({ me, onClose }: { me: Me | null; onClose: () => void })
           <button className="ghost" onClick={onClose}>Cancel</button>
         </div>
       </>)}
+    </div>
+  );
+}
+
+export function Subscription({ me, onChanged }: { me: Me | null; onChanged: (m: Me) => void }) {
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<{ message: string; ref: string } | null>(null);
+  if (!me) return null;
+  const end = me.pro_expires_at ? day(me.pro_expires_at) : "";
+
+  async function cancel() {
+    setBusy(true); setErr(null);
+    try { await cancelSubscription(); onChanged(await getMe()); setConfirm(false); }
+    catch (e) { const x = e as ApiError; setErr({ message: x.message, ref: x.ref }); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <strong>Subscription</strong>
+      {!me.is_pro ? (
+        <p className="muted">You&apos;re on the Free plan. Use the Go Pro button to upgrade.</p>
+      ) : me.cancels_at_period_end ? (
+        <p className="muted">Your Pro plan is cancelled. You keep Pro until <strong style={{ color: "var(--text)" }}>{end}</strong> and it won&apos;t renew.</p>
+      ) : (<>
+        <p className="muted">ProfileIQ Pro — ₹199/month. {end && <>Renews on <strong style={{ color: "var(--text)" }}>{end}</strong>.</>}</p>
+        {!confirm ? (
+          <button className="ghost" onClick={() => setConfirm(true)}>Cancel subscription</button>
+        ) : (
+          <div>
+            <p className="muted">You&apos;ll keep Pro until the end of the period you&apos;ve paid for. It won&apos;t renew after that.</p>
+            <div className="row">
+              <button onClick={cancel} disabled={busy}>{busy ? "Cancelling…" : "Yes, cancel at period end"}</button>
+              <button className="ghost" onClick={() => setConfirm(false)} disabled={busy}>Keep Pro</button>
+            </div>
+          </div>
+        )}
+      </>)}
+      {err && <div className="err" role="alert">{err.message}<small>Reference: {err.ref}</small></div>}
     </div>
   );
 }

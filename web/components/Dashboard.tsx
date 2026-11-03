@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { ApiError, cancelSubscription, getMe, scoreResume, type Me, type ScoreResult } from "@/lib/api";
+import { ApiError, confirmSubscription, getMe, scoreResume, type Me, type ScoreResult } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import Rewrite from "./Rewrite";
 import Upgrade from "./Upgrade";
-import { Invoices, Support } from "./Account";
+import { Invoices, Subscription, Support } from "./Account";
+import { PENDING_KEY, unlockPage } from "./Upgrade";
 
 const MAX_MB = 10;
 
@@ -18,13 +19,48 @@ export default function Dashboard() {
   const [result, setResult] = useState<ScoreResult | null>(null);
   const [level, setLevel] = useState<"existing" | "fresher">("existing");
   const picker = useRef<HTMLInputElement>(null);
-  const [confirmCancel, setConfirmCancel] = useState(false);
   const [panel, setPanel] = useState<"" | "billing" | "support">("");
-  const [cancelErr, setCancelErr] = useState("");
+  const [payNote, setPayNote] = useState("");
+
+  // Coming back from a UPI app: make sure the page can scroll and nothing from checkout is left covering it.
+  useEffect(() => {
+    // On a fresh page load nothing from checkout can still be running, so clear everything. When the tab
+    // merely comes back to the foreground, only fix scrolling (a payment may still be in progress).
+    unlockPage(true);
+    const back = () => unlockPage(false);
+    const vis = () => { if (document.visibilityState === "visible") unlockPage(false); };
+    window.addEventListener("pageshow", back);
+    document.addEventListener("visibilitychange", vis);
+    return () => { window.removeEventListener("pageshow", back); document.removeEventListener("visibilitychange", vis); };
+  }, []);
 
   useEffect(() => {
     getMe().then(setMe).catch((e: ApiError) => setMeError(e.message));
   }, []);
+
+  // If the phone left the page during payment (UPI app hand-off can reload it), finish activating Pro now.
+  useEffect(() => {
+    if (!me || me.is_pro) return;
+    let raw: string | null = null;
+    try { raw = localStorage.getItem(PENDING_KEY); } catch { /* storage blocked */ }
+    if (!raw) return;
+    let pending: { id: string; ts: number } | null = null;
+    try { pending = JSON.parse(raw); } catch { /* ignore */ }
+    const clear = () => { try { localStorage.removeItem(PENDING_KEY); } catch { /* ignore */ } };
+    if (!pending?.id || Date.now() - pending.ts > 30 * 60 * 1000) return clear();
+    let stop = false;
+    (async () => {
+      setPayNote("Checking your payment…");
+      for (let i = 0; i < 8 && !stop; i++) {
+        const r = await confirmSubscription(pending!.id).catch(() => null);
+        if (r?.status === "paid") { clear(); unlockPage(); setMe(await getMe()); setPayNote("Payment received — you're Pro now. Enjoy!"); return; }
+        if (r?.status === "not_paid") { clear(); setPayNote(""); return; }
+        await new Promise((res) => setTimeout(res, 2500));
+      }
+      setPayNote("");
+    })();
+    return () => { stop = true; };
+  }, [me?.is_pro, me === null]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function choose(f: File | undefined | null) {
     setError(null);
@@ -55,19 +91,20 @@ export default function Dashboard() {
 
   return (
     <>
-      <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-        <div style={{ flex: "1 1 200px" }}>
-          <strong style={{ wordBreak: "break-all" }}>{me?.email ?? "…"}</strong>{" "}
+      <div className="topbar">
+        <div className="who">
+          <strong>{me?.email ?? "…"}</strong>{" "}
           {me?.is_pro && <span className="pill">PRO</span>}
           {me && !me.is_pro && <span className="muted" style={{ fontSize: 12 }}> · {me.scans_left} free scans left</span>}
         </div>
-        <div className="row" style={{ flex: "0 0 auto", flexWrap: "nowrap" }}>
-          {me?.has_billing && <button className="ghost" style={{ width: "auto" }} onClick={() => setPanel(panel === "billing" ? "" : "billing")}>{me.is_pro ? "Manage" : "Billing"}</button>}
-          <button className="ghost" style={{ width: "auto" }} onClick={() => setPanel(panel === "support" ? "" : "support")}>Support</button>
-          <button className="ghost" style={{ width: "auto" }} onClick={() => supabase.auth.signOut()}>Sign out</button>
+        <div className="actions">
+          {me?.has_billing && <button className="ghost" onClick={() => setPanel(panel === "billing" ? "" : "billing")}>{me.is_pro ? "Manage" : "Billing"}</button>}
+          <button className="ghost" onClick={() => setPanel(panel === "support" ? "" : "support")}>Support</button>
+          <button className="ghost" onClick={() => supabase.auth.signOut()}>Sign out</button>
         </div>
       </div>
-      {panel === "billing" && <Invoices />}
+      {payNote && <div className="ok" role="status">{payNote}</div>}
+      {panel === "billing" && (<><Subscription me={me} onChanged={setMe} /><Invoices /></>)}
       {panel === "support" && <Support me={me} onClose={() => setPanel("")} />}
       {meError && <div className="err" role="alert">{meError}</div>}
       {me && !me.is_pro && (
@@ -77,24 +114,6 @@ export default function Dashboard() {
           <Upgrade me={me} onUpgraded={setMe} />
         </div>
       )}
-      {me?.is_pro && me.pro_expires_at && (
-        <p className="muted" style={{ fontSize: 12 }}>
-          {me.cancels_at_period_end ? "Pro ends on " : "Pro renews on "}{new Date(me.pro_expires_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
-          {!me.cancels_at_period_end && !confirmCancel && <> · <a href="#cancel" onClick={(e) => { e.preventDefault(); setConfirmCancel(true); }}>Cancel plan</a></>}
-        </p>
-      )}
-      {confirmCancel && (
-        <div className="card" style={{ marginBottom: 12 }}>
-          <strong>Cancel your Pro plan?</strong>
-          <p className="muted">You keep Pro until the end of the period you&apos;ve paid for. It won&apos;t renew after that.</p>
-          <div className="row">
-            <button onClick={async () => { setCancelErr(""); try { await cancelSubscription(); setMe(await getMe()); setConfirmCancel(false); } catch (e) { setCancelErr((e as ApiError).message); } }}>Yes, cancel at period end</button>
-            <button className="ghost" onClick={() => setConfirmCancel(false)}>Keep Pro</button>
-          </div>
-          {cancelErr && <div className="err" role="alert">{cancelErr}</div>}
-        </div>
-      )}
-
       <div className="tabs" role="tablist" style={{ marginTop: 12 }}>
         <button role="tab" aria-selected={level === "existing"} className={level === "existing" ? "on" : ""} onClick={() => setLevel("existing")}>I&apos;m experienced</button>
         <button role="tab" aria-selected={level === "fresher"} className={level === "fresher" ? "on" : ""} onClick={() => setLevel("fresher")}>I&apos;m a fresher</button>

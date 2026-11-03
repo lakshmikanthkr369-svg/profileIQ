@@ -51,3 +51,9 @@ ol.sugs { padding-left:20px; line-height:1.55; }
 @keyframes piqAutofill { from { opacity: 1; } to { opacity: 1; } }
 input:-webkit-autofill { animation-name: piqAutofill; animation-duration: 1ms; -webkit-text-fill-color: #fff; caret-color: #fff; box-shadow: 0 0 0 1000px #111 inset; }
 select { width:100%; background:#111; color:var(--text); border:1px solid var(--line); border-radius:10px; padding:12px 14px; font:inherit; font-size:16px; }
+
+/* Header: email on its own line, buttons wrap below on phones (no sideways overflow) */
+.topbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 12px; margin-bottom:8px; }
+.topbar .who { flex:1 1 220px; min-width:0; overflow-wrap:anywhere; }
+.topbar .actions { display:flex; flex-wrap:wrap; gap:8px; }
+.topbar .actions button { width:auto; min-height:40px; padding:8px 14px; }

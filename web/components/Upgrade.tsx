@@ -20,6 +20,19 @@ function loadCheckout(): Promise<void> {
   });
 }
 
+export const PENDING_KEY = "piq_pending_sub";
+/** Razorpay locks page scrolling while checkout is open and, on some phones (UPI app hand-off), forgets to
+ *  unlock it or leaves its full-screen layer behind. Put the page back to normal. */
+export function unlockPage(removeLayer = true) {
+  try {
+    for (const el of [document.documentElement, document.body]) {
+      el.style.overflow = ""; el.style.position = ""; el.style.height = ""; el.style.top = ""; el.style.touchAction = "";
+    }
+    document.body.classList.remove("razorpay-checkout-open");
+    if (removeLayer) document.querySelectorAll(".razorpay-container, iframe.razorpay-checkout-frame").forEach((n) => n.remove());
+  } catch { /* nothing to undo */ }
+}
+
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface Props { me: Me | null; onUpgraded: (m: Me) => void; label?: string; compact?: boolean }
@@ -35,7 +48,7 @@ export default function Upgrade({ me, onUpgraded, label = "Upgrade to Pro — �
     setMsg("Payment received — activating your Pro plan…");
     for (let i = 0; i < 8; i++) {                // payment confirmation can take a few seconds
       const r = await confirmSubscription(subId).catch(() => null);
-      if (r?.status === "paid") { onUpgraded(await getMe()); setMsg("You're Pro now. Enjoy!"); return; }
+      if (r?.status === "paid") { try { localStorage.removeItem(PENDING_KEY); } catch { /* ignore */ } onUpgraded(await getMe()); setMsg("You're Pro now. Enjoy!"); return; }
       await wait(2500);
     }
     setMsg("");
@@ -52,16 +65,17 @@ export default function Upgrade({ me, onUpgraded, label = "Upgrade to Pro — �
     setBusy(true);
     try {
       const sub: Subscribe = await startSubscription(phone);
+      try { localStorage.setItem(PENDING_KEY, JSON.stringify({ id: sub.subscription_id, ts: Date.now() })); } catch { /* storage blocked */ }
       await loadCheckout();
       if (!window.Razorpay) throw new ApiError("Secure checkout couldn't load. Check your connection and try again.", "checkout-load", 0);
       const rzp = new window.Razorpay({
         key: sub.key_id, subscription_id: sub.subscription_id, name: "ProfileIQ",
         description: "ProfileIQ Pro — monthly subscription",
         prefill: { email: sub.email, contact: sub.contact }, theme: { color: "#F59E0B" },
-        handler: () => { setBusy(true); activate(sub.subscription_id).finally(() => setBusy(false)); },
-        modal: { ondismiss: () => { setBusy(false); setMsg("Checkout closed. Tap Upgrade to try again."); } },
+        handler: () => { unlockPage(); setBusy(true); activate(sub.subscription_id).finally(() => { setBusy(false); unlockPage(); }); },
+        modal: { ondismiss: () => { unlockPage(); setBusy(false); setMsg("Checkout closed. Tap Upgrade to try again."); } },
       });
-      rzp.on("payment.failed", (r) => { setBusy(false); setError({ message: `Payment failed: ${r.error.description}`, ref: "payment-failed" }); });
+      rzp.on("payment.failed", (r) => { unlockPage(); setBusy(false); setError({ message: `Payment failed: ${r.error.description}`, ref: "payment-failed" }); });
       rzp.open();
       setBusy(false);
     } catch (e) {
