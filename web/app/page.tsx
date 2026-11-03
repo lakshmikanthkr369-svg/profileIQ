@@ -10,6 +10,7 @@ export default function Home() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    (window as unknown as { __piqReady?: boolean }).__piqReady = true;
     supabase.auth.getSession().then(({ data }) => { setSession(data.session); setReady(true); });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => sub.subscription.unsubscribe();

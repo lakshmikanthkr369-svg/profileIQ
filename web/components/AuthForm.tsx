@@ -5,22 +5,35 @@ import { isValidEmail, normalizeIndianMobile } from "@/lib/validate";
 
 type Mode = "login" | "signup" | "forgot";
 
+function withTimeout<T>(p: Promise<T>, ms = 20000): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("This is taking too long. Check your connection and try again.")), ms);
+    p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
+}
+
 export default function AuthForm() {
   const [mode, setMode] = useState<Mode>("login");
-  const [name, setName] = useState("");
-  const [mobile, setMobile] = useState("");
+  const [nameState, setName] = useState("");
+  const [mobileState, setMobile] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [passwordState, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
 
-  async function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(""); setNotice("");
-    const em = email.trim();
+    // Read what is actually in the fields: phone autofill / password managers can fill them without
+    // telling React, which left the state empty and made Log in look dead.
+    const f = new FormData(e.currentTarget);
+    const val = (k: string, fallback: string) => String(f.get(k) ?? fallback);
+    const em = val("email", email).trim();
+    const password = val("password", passwordState);
+    const name = val("name", nameState), mobile = val("mobile", mobileState);
     if (!isValidEmail(em)) return setError("Enter a valid email address.");
     setBusy(true);
     try {
@@ -29,7 +42,7 @@ export default function AuthForm() {
         if (error) throw error;
         setNotice("If that email has an account, a reset link is on its way.");
       } else if (mode === "login") {
-        const { error } = await supabase.auth.signInWithPassword({ email: em, password });
+        const { error } = await withTimeout(supabase.auth.signInWithPassword({ email: em, password }));
         if (error) throw error;
       } else {
         const nm = name.trim();
@@ -54,19 +67,19 @@ export default function AuthForm() {
   }
 
   return (
-    <form className="card" onSubmit={submit} noValidate>
+    <form className="card" method="post" action="#" onSubmit={submit} noValidate>
       <h2 style={{ marginTop: 0 }}>{mode === "login" ? "Log in" : mode === "signup" ? "Create your account" : "Reset password"}</h2>
       {mode === "signup" && (<>
         <label htmlFor="name">Full name</label>
-        <input id="name" type="text" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
+        <input id="name" type="text" autoComplete="name" name="name" value={nameState} onChange={(e) => setName(e.target.value)} />
         <label htmlFor="mobile">Mobile number</label>
-        <input id="mobile" type="tel" inputMode="numeric" autoComplete="tel" placeholder="98765 43210" value={mobile} onChange={(e) => setMobile(e.target.value)} />
+        <input id="mobile" type="tel" inputMode="numeric" autoComplete="tel" placeholder="98765 43210" name="mobile" value={mobileState} onChange={(e) => setMobile(e.target.value)} />
       </>)}
       <label htmlFor="email">Email</label>
-      <input id="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+      <input id="email" name="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
       {mode !== "forgot" && (<>
         <label htmlFor="password">Password</label>
-        <input id="password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(e) => setPassword(e.target.value)} />
+        <input id="password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} name="password" value={passwordState} onChange={(e) => setPassword(e.target.value)} />
       </>)}
       {error && <div className="err" role="alert">{error}</div>}
       {notice && <div className="ok" role="status">{notice}</div>}
