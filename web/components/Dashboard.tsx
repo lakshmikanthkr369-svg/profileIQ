@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, getMe, scoreResume, type Me, type ScoreResult } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
+import Rewrite from "./Rewrite";
 
 const MAX_MB = 10;
 
@@ -84,8 +85,7 @@ export default function Dashboard() {
       </div>
 
       {tab === "rewrite" ? (
-        <div className="card"><strong>Rewrite with AI is coming next.</strong>
-          <p className="muted">This screen is being rebuilt. Your live app still has it today.</p></div>
+        <Rewrite me={me} file={file} jd={jd} />
       ) : (<>
         {error && <div className="err" role="alert">{error.message}<small>Reference: {error.ref}</small></div>}
         {outOfScans && <div className="err">You have used all 3 free scans this month. Upgrade to Pro for unlimited scans.</div>}

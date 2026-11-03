@@ -37,3 +37,50 @@ export function scoreResume(file: File, jd: string) {
   const form = new FormData(); form.append("resume", file); form.append("jd", jd);
   return api<ScoreResult>("/v1/score", { method: "POST", body: form });
 }
+
+export interface ResumeData {
+  name?: string; title?: string; contact?: string; summary?: string;
+  [k: string]: unknown;
+}
+export interface RewriteResult { data: ResumeData; after_score: number; after_matched: string[]; after_missing: string[] }
+export interface FresherProfile {
+  full_name: string; email: string; phone: string; degree: string; institute: string;
+  university: string; year_of_passing: string; key_skills: string;
+  projects: { name: string; description: string }[];
+  certifications: { name: string }[];
+}
+
+export const getTemplates = () => api<{ templates: string[] }>("/v1/templates");
+export function rewriteResume(file: File, jd: string) {
+  const form = new FormData(); form.append("resume", file); form.append("jd", jd);
+  return api<RewriteResult>("/v1/rewrite", { method: "POST", body: form });
+}
+export const buildFresher = (profile: FresherProfile, jd: string) =>
+  api<{ data: ResumeData }>("/v1/fresher", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profile, jd }),
+  });
+export const previewResume = (data: ResumeData, template: string) =>
+  api<{ html: string }>("/v1/resume/preview", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data, template, format: "pdf" }),
+  });
+
+export async function downloadResume(data: ResumeData, template: string, format: "pdf" | "docx") {
+  const { data: sess } = await supabase.auth.getSession();
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/v1/resume/file`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${sess.session?.access_token ?? ""}` },
+      body: JSON.stringify({ data, template, format }),
+    });
+  } catch { throw new ApiError("We couldn't reach the server. Check your connection and try again.", "network", 0); }
+  if (!res.ok) {
+    let b: { message?: string; ref?: string } = {};
+    try { b = await res.json(); } catch { /* ignore */ }
+    throw new ApiError(b.message ?? "Download failed. Please try again.", b.ref ?? `http-${res.status}`, res.status);
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url; a.download = `ProfileIQ_Resume.${format}`; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
