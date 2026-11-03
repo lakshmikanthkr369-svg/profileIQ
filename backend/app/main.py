@@ -22,12 +22,24 @@ ALLOWED_EXT = (".pdf", ".doc", ".docx")
 FILE_ERRORS = {"EMPTY_RESUME", "NOT_WORD", "ENCRYPTED_DOC", "BAD_DOC", "DOC_LIB_MISSING"}
 
 
+MAX_JSON_BYTES = 300 * 1024
+
+
 @app.middleware("http")
 async def security_headers(request, call_next):
+    # Refuse oversized request bodies early (uploads are checked separately, with a friendly message).
+    try:
+        length = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        length = 0
+    is_json = "application/json" in request.headers.get("content-type", "")
+    if (is_json and length > MAX_JSON_BYTES) or length > config.MAX_UPLOAD_BYTES + 1024 * 1024:
+        return JSONResponse(status_code=413, content={"message": "That request is too large.", "ref": "too-large"})
     resp = await call_next(request)
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Cache-Control"] = "no-store"
     resp.headers["Referrer-Policy"] = "no-referrer"
+    resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return resp
 
 
@@ -184,6 +196,7 @@ def _check_template(t: str) -> str:
 @app.post("/v1/resume/file")
 def resume_file(body: FileIn, user: dict = Depends(auth.current_user)):
     _require_pro(user)
+    check_rate(f"file:{user['id']}", 30, 600, "You're going a little fast. Please wait a few minutes and try again.")
     tpl = _check_template(body.template)
     try:
         if body.format == "docx":
@@ -201,6 +214,7 @@ def resume_file(body: FileIn, user: dict = Depends(auth.current_user)):
 @app.post("/v1/resume/preview")
 def resume_preview(body: FileIn, user: dict = Depends(auth.current_user)):
     _require_pro(user)
+    check_rate(f"preview:{user['id']}", 120, 600, "You're going a little fast. Please wait a few minutes and try again.")
     try:
         return {"html": resume_preview_html(body.data, _check_template(body.template))}
     except HTTPException:
@@ -219,11 +233,13 @@ class ReconcileIn(BaseModel):
 
 @app.post("/v1/billing/subscribe")
 def subscribe(body: SubscribeIn, user: dict = Depends(auth.current_user)):
+    check_rate(f"subscribe:{user['id']}", 10, 3600, "Too many checkout attempts. Please wait a while and try again.")
     return billing.create_subscription(user, auth.get_profile(user["id"]), body.mobile)
 
 
 @app.post("/v1/billing/confirm")
 def confirm(body: ReconcileIn, user: dict = Depends(auth.current_user)):
+    check_rate(f"confirm:{user['id']}", 60, 600, "Too many requests. Please wait a minute and try again.")
     if not body.subscription_id.startswith("sub_") or len(body.subscription_id) > 40:
         raise HTTPException(422, {"message": "Invalid subscription.", "ref": "bad-sub"})
     return {"status": billing.reconcile(user, body.subscription_id)}

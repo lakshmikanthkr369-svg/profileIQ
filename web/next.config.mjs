@@ -1,4 +1,23 @@
+const api = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+const supa = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/$/, "");
+const rzp = "https://*.razorpay.com";
+// Only the hosts the app really talks to. 'unsafe-inline' is needed for Next's own bootstrap scripts.
+const csp = [
+  "default-src 'self'",
+  `script-src 'self' 'unsafe-inline' ${rzp}`,
+  "style-src 'self' 'unsafe-inline'",
+  `connect-src 'self' ${api} ${supa} ${rzp}`,
+  `frame-src ${rzp}`,
+  `img-src 'self' data: https: blob:`,
+  `font-src 'self' data:`,
+  "object-src 'none'",
+  "base-uri 'self'",
+  `form-action 'self' ${rzp}`,
+  "frame-ancestors 'none'",
+].join("; ");
+
 const securityHeaders = [
+  { key: "Content-Security-Policy", value: csp },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },

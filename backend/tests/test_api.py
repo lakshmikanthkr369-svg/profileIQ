@@ -300,3 +300,14 @@ def test_support_is_rate_limited(client, monkeypatch):
     _fake_db(monkeypatch, [])
     codes = [client.post("/v1/support", json={"type": "Other", "message": "hi"}).status_code for _ in range(7)]
     assert codes[:5] == [200] * 5 and codes[5] == 429
+
+
+def test_oversized_json_is_refused(client):
+    r = client.post("/v1/support", content=b'{"type":"Other","message":"' + b"a" * 400_000 + b'"}', headers={"content-type": "application/json"})
+    assert r.status_code == 413 and r.json()["ref"] == "too-large"
+
+
+def test_subscribe_is_rate_limited(client, monkeypatch):
+    _fake_rzp(monkeypatch)
+    codes = [client.post("/v1/billing/subscribe", json={"mobile": "9876543210"}).status_code for _ in range(12)]
+    assert codes[9] == 200 and codes[10] == 429
