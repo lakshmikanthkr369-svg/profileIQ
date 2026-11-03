@@ -4,6 +4,7 @@ import { ApiError, cancelSubscription, getMe, scoreResume, type Me, type ScoreRe
 import { supabase } from "@/lib/supabase";
 import Rewrite from "./Rewrite";
 import Upgrade from "./Upgrade";
+import { Invoices, Support } from "./Account";
 
 const MAX_MB = 10;
 
@@ -18,6 +19,7 @@ export default function Dashboard() {
   const [tab, setTab] = useState<"score" | "rewrite">("score");
   const picker = useRef<HTMLInputElement>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [panel, setPanel] = useState<"" | "billing" | "support">("");
   const [cancelErr, setCancelErr] = useState("");
 
   useEffect(() => {
@@ -59,8 +61,14 @@ export default function Dashboard() {
           {me?.is_pro && <span className="pill">PRO</span>}
           {me && !me.is_pro && <span className="muted" style={{ fontSize: 12 }}> · {me.scans_left} free scans left</span>}
         </div>
-        <button className="ghost" style={{ flex: "0 0 auto", width: "auto" }} onClick={() => supabase.auth.signOut()}>Sign out</button>
+        <div className="row" style={{ flex: "0 0 auto", flexWrap: "nowrap" }}>
+          {me?.has_billing && <button className="ghost" style={{ width: "auto" }} onClick={() => setPanel(panel === "billing" ? "" : "billing")}>{me.is_pro ? "Manage" : "Billing"}</button>}
+          <button className="ghost" style={{ width: "auto" }} onClick={() => setPanel(panel === "support" ? "" : "support")}>Support</button>
+          <button className="ghost" style={{ width: "auto" }} onClick={() => supabase.auth.signOut()}>Sign out</button>
+        </div>
       </div>
+      {panel === "billing" && <Invoices />}
+      {panel === "support" && <Support me={me} onClose={() => setPanel("")} />}
       {meError && <div className="err" role="alert">{meError}</div>}
       {me && !me.is_pro && (
         <div className="card" style={{ margin: "12px 0" }}>

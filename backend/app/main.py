@@ -7,10 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from . import auth, billing, config
+from . import auth, billing, config, invoices
 from .ai import build_fresher_resume, do_rewrite, get_suggestions, score_resume
 from .ai_errors import describe_ai_error
-from .limits import check_ai_rate
+from .limits import check_ai_rate, check_rate
 from .readers import extract_text
 from .resume_files import RESUME_TEMPLATES, make_docx, make_pdf, resume_preview_html
 
@@ -79,6 +79,7 @@ def me(user: dict = Depends(auth.current_user)):
             "scans_left": None if pro else auth.free_scans_left(profile),
             "pro_expires_at": (profile or {}).get("pro_expires_at") if pro else None,
             "cancels_at_period_end": pro and (profile or {}).get("subscription_status") == "cancel_at_cycle_end",
+            "has_billing": pro or bool((profile or {}).get("razorpay_subscription_id")),
             "has_mobile": bool(billing.normalize_mobile((profile or {}).get("phone")))}
 
 
@@ -231,4 +232,26 @@ def confirm(body: ReconcileIn, user: dict = Depends(auth.current_user)):
 @app.post("/v1/billing/cancel")
 def cancel(user: dict = Depends(auth.current_user)):
     billing.cancel(user, auth.get_profile(user["id"]))
+    return {"ok": True}
+
+
+@app.get("/v1/invoices")
+def invoice_list(user: dict = Depends(auth.current_user)):
+    return {"invoices": invoices.list_invoices(user["id"])}
+
+
+@app.post("/v1/invoices/{invoice_id}/email")
+def invoice_email(invoice_id: int, user: dict = Depends(auth.current_user)):
+    return {"sent_to": invoices.resend_invoice(user, invoice_id)}
+
+
+class SupportIn(BaseModel):
+    type: str = "Feedback"
+    message: str
+
+
+@app.post("/v1/support")
+def support(body: SupportIn, user: dict = Depends(auth.current_user)):
+    check_rate(f"support:{user['id']}", 5, 3600, "You've sent several messages already. Please wait a while before sending another.")
+    invoices.submit_support(user, body.type, body.message)
     return {"ok": True}

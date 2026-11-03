@@ -12,6 +12,8 @@ FUTURE = "2099-01-01T00:00:00+00:00"
 
 @pytest.fixture
 def client(monkeypatch):
+    from app import limits
+    limits._calls.clear()
     main.app.dependency_overrides[auth.current_user] = lambda: USER
     state = {"profile": {"id": "u1", "plan": "free", "scans_used": 0}, "recorded": 0}
     monkeypatch.setattr(auth, "get_profile", lambda uid: dict(state["profile"]))
@@ -235,3 +237,66 @@ def test_cancel_requires_active_subscription(client, monkeypatch):
     client.state["profile"].update(plan="pro", pro_expires_at=FUTURE, razorpay_subscription_id="sub_123")
     assert client.post("/v1/billing/cancel").status_code == 200
     assert any(c[0] == "POST" and c[1] == "/subscriptions/sub_123/cancel" for c in calls)
+
+
+# ── invoices + support ──
+def _fake_db(monkeypatch, rows, status=200):
+    from app import invoices
+    seen = []
+
+    class R:
+        def __init__(s, st, data): s.status_code, s._d = st, data
+        def json(s): return s._d
+
+    def rest(path, **kw):
+        seen.append((kw.get("method", "GET"), path, kw.get("json")))
+        return R(status, rows if kw.get("method", "GET") == "GET" else {})
+    monkeypatch.setattr(invoices, "_rest", rest)
+    sent = []
+    monkeypatch.setattr(invoices, "_send_email", lambda p, k: sent.append(p) or True)
+    return seen, sent
+
+
+def test_invoice_list_is_scoped_to_user(client, monkeypatch):
+    seen, _ = _fake_db(monkeypatch, [{"id": 1, "invoice_number": "PIQ-1"}])
+    main.app.dependency_overrides[auth.current_user] = lambda: {"id": "6f1c2a3e-1111-4222-8333-444455556666", "email": "a@b.com"}
+    r = client.get("/v1/invoices")
+    assert r.status_code == 200 and r.json()["invoices"][0]["invoice_number"] == "PIQ-1"
+    assert "user_id=eq.6f1c2a3e-1111-4222-8333-444455556666" in seen[0][1]
+
+
+def test_invoice_list_rejects_bad_user_id(client, monkeypatch):
+    _fake_db(monkeypatch, [])
+    assert client.get("/v1/invoices").status_code == 400      # test user id "u1" is not a UUID
+
+
+def test_resend_goes_to_invoice_address_and_respects_cooldown(client, monkeypatch):
+    row = {"id": 1, "invoice_number": "PIQ-1", "customer_email": "owner@x.com", "razorpay_payment_id": "pay_1",
+           "html_body": "<p>inv</p>", "text_body": "inv", "emailed_at": None, "last_resent_at": None, "resend_count": 0}
+    seen, sent = _fake_db(monkeypatch, [row])
+    r = client.post("/v1/invoices/1/email")
+    assert r.status_code == 200 and r.json()["sent_to"] == "owner@x.com" and sent[0]["to"] == ["owner@x.com"]
+    from datetime import datetime, timezone
+    row["last_resent_at"] = datetime.now(timezone.utc).isoformat()
+    assert client.post("/v1/invoices/1/email").status_code == 429
+
+
+def test_resend_without_saved_copy_and_unknown_invoice(client, monkeypatch):
+    _fake_db(monkeypatch, [{"id": 1, "invoice_number": "x", "html_body": None, "razorpay_payment_id": "p"}])
+    assert client.post("/v1/invoices/1/email").json()["ref"] == "no-copy"
+    _fake_db(monkeypatch, [])
+    assert client.post("/v1/invoices/9/email").status_code == 404
+
+
+def test_support_validates_and_escapes(client, monkeypatch):
+    seen, sent = _fake_db(monkeypatch, [])
+    assert client.post("/v1/support", json={"type": "Hack", "message": "x"}).status_code == 422
+    assert client.post("/v1/support", json={"type": "Bug Report", "message": "   "}).status_code == 422
+    assert client.post("/v1/support", json={"type": "Bug Report", "message": "<script>alert(1)</script>"}).status_code == 200
+    assert "<script>" not in sent[0]["html"] and "&lt;script&gt;" in sent[0]["html"]
+
+
+def test_support_is_rate_limited(client, monkeypatch):
+    _fake_db(monkeypatch, [])
+    codes = [client.post("/v1/support", json={"type": "Other", "message": "hi"}).status_code for _ in range(7)]
+    assert codes[:5] == [200] * 5 and codes[5] == 429

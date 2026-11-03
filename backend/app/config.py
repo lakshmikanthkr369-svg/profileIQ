@@ -22,3 +22,8 @@ AI_WINDOW_SECONDS = int(os.getenv("AI_WINDOW_SECONDS", "300"))
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
 RAZORPAY_PLAN_ID = os.getenv("RAZORPAY_PLAN_ID", "")
+
+# Email (Resend) for invoice copies and support notifications
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+INVOICE_FROM = os.getenv("INVOICE_FROM", "ProfileIQ <support@profileiq.co.in>")
+SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "support@profileiq.co.in")

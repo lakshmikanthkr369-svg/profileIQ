@@ -17,3 +17,14 @@ def check_ai_rate(user_id: str):
                                       "ref": "rate-limit"})
         recent.append(now)
         _calls[user_id] = recent
+
+
+def check_rate(key: str, max_calls: int, window: int, message: str):
+    """Generic per-key limiter (used for support messages)."""
+    now = time.time()
+    with _lock:
+        recent = [t for t in _calls.get(key, []) if now - t < window]
+        if len(recent) >= max_calls:
+            raise HTTPException(429, {"message": message, "ref": "rate-limit"})
+        recent.append(now)
+        _calls[key] = recent

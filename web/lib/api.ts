@@ -29,7 +29,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export interface Me { id: string; email: string; full_name?: string | null; is_pro: boolean; scans_left: number | null; pro_expires_at: string | null; cancels_at_period_end?: boolean; has_mobile?: boolean }
+export interface Me { id: string; email: string; full_name?: string | null; is_pro: boolean; scans_left: number | null; pro_expires_at: string | null; cancels_at_period_end?: boolean; has_billing?: boolean; has_mobile?: boolean }
 export interface ScoreResult { score: number; matched: string[]; missing: string[]; suggestions: string[]; scans_left: number | null }
 
 export const getMe = () => api<Me>("/v1/me");
@@ -91,3 +91,8 @@ const post = <T>(path: string, body?: unknown) =>
 export const startSubscription = (mobile?: string) => post<Subscribe>("/v1/billing/subscribe", { mobile: mobile || null });
 export const confirmSubscription = (subscription_id: string) => post<{ status: "paid" | "pending" | "not_paid" }>("/v1/billing/confirm", { subscription_id });
 export const cancelSubscription = () => post<{ ok: boolean }>("/v1/billing/cancel");
+
+export interface Invoice { id: number; invoice_number: string; issued_at: string; amount_paise: number; currency: string; payment_method: string | null; emailed_at: string | null }
+export const listInvoices = () => api<{ invoices: Invoice[] }>("/v1/invoices");
+export const emailInvoice = (id: number) => post<{ sent_to: string }>(`/v1/invoices/${id}/email`);
+export const sendSupport = (type: string, message: string) => post<{ ok: boolean }>("/v1/support", { type, message });
