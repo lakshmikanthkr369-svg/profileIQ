@@ -35,7 +35,7 @@ except:
 try:
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 except:
-    SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkeWJ0YXlpcnhvY2xqd2t5ZHlnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NDEzMTM4MCwiZXhwIjoyMDk5NzA3MzgwfQ.sW_EkD71c8jJP1XM35PH5MYAkK8S0ThJlgQwe94hA_E")
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")  # service-role secret: set ONLY in Railway variables, never in code
 
 # Anon key for auth endpoints (login/register/reset)
 # Service role key bypasses RLS but auth endpoints need anon key
@@ -378,10 +378,16 @@ def render_razorpay_checkout(subscription_id, email, key_suffix="", contact=""):
     <div id="rzp-status-{key_suffix}" style="font-family:Inter,sans-serif;font-size:13px;color:#888;padding:8px 0">
       Opening secure checkout...
     </div>
-    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
     <script>
     (function() {{
         var status = document.getElementById("rzp-status-{key_suffix}");
+        // Streamlit runs components inside a sandboxed iframe. Razorpay opened from
+        // INSIDE that iframe cannot hand off to UPI apps on a phone (the sandbox
+        // blocks the upi:// / intent:// app launch), so only "enter UPI ID" worked.
+        // Run checkout from the parent page instead, like a normal website would.
+        var P = window;
+        try {{ if (window.parent && window.parent.document && window.parent.document.body) P = window.parent; }} catch (e) {{ P = window; }}
+
         var options = {{
             "key": "{RAZORPAY_KEY_ID}",
             "subscription_id": {sub_js},
@@ -411,15 +417,31 @@ def render_razorpay_checkout(subscription_id, email, key_suffix="", contact=""):
                 }}
             }}
         }};
-        var rzp = new Razorpay(options);
-        rzp.on('payment.failed', function (response) {{
-            status.innerHTML = "&#10060; Payment failed: " + response.error.description;
-            status.style.color = "#f87171";
-        }});
-        rzp.open();
+
+        function launch() {{
+            var rzp = new P.Razorpay(options);
+            rzp.on('payment.failed', function (response) {{
+                status.innerHTML = "&#10060; Payment failed: " + response.error.description;
+                status.style.color = "#f87171";
+            }});
+            rzp.open();
+        }}
+
+        if (P.Razorpay) {{
+            launch();
+        }} else {{
+            var s = P.document.createElement("script");
+            s.src = "https://checkout.razorpay.com/v1/checkout.js";
+            s.onload = launch;
+            s.onerror = function () {{
+                status.innerHTML = "&#10060; Could not load the payment window. Please check your connection and try again.";
+                status.style.color = "#f87171";
+            }};
+            P.document.head.appendChild(s);
+        }}
     }})();
     </script>
-    """, height=650, scrolling=True)
+    """, height=80, scrolling=True)
 
 def render_upgrade_cta(key_suffix):
     """Renders the Upgrade to Pro button + checkout flow. Call once per
@@ -1036,6 +1058,25 @@ button[aria-label="Hide password"] { display: none !important; }
     color: #888 !important;
     width: auto !important;
     padding: 4px !important;
+}
+
+/* ── Replace-resume button ──
+   Once a resume is chosen, Streamlit swaps the big UPLOAD button for a tiny
+   "+" icon (aria-label "Add files"). Icons are hidden app-wide (font-size:0
+   above), so on a phone that left NO visible way to pick another file.
+   Show it as a full-width amber button. */
+[data-testid="stFileUploaderDropzone"] button[aria-label="Add files"] {
+    width: 100% !important; max-width: 100% !important; height: auto !important;
+    min-height: 46px !important; margin-top: 10px !important;
+    padding: 12px 24px !important; justify-content: center !important;
+    background: #F59E0B !important; border: none !important; border-radius: 8px !important;
+    cursor: pointer !important; opacity: 1 !important;
+}
+[data-testid="stFileUploaderDropzone"] button[aria-label="Add files"] > * { display: none !important; }
+[data-testid="stFileUploaderDropzone"] button[aria-label="Add files"]::after {
+    content: "UPLOAD A DIFFERENT RESUME";
+    color: #1a1a1a; font-weight: 800; font-size: 13px; letter-spacing: 0.06em;
+    font-family: Inter, sans-serif; text-transform: uppercase;
 }
 /* Catch-all: Material icon ligature text (e.g. "add", "close", "delete") can
    render as literal words if the icon font hasn't loaded yet or a new
