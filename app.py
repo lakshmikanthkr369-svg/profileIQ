@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import anthropic
 import pdfplumber
 import os
@@ -374,19 +373,16 @@ def render_razorpay_checkout(subscription_id, email, key_suffix="", contact=""):
         return json.dumps(v).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
     prefill_js = _js({k: v for k, v in (("email", email), ("contact", contact)) if v})
     sub_js = _js(str(subscription_id))
-    components.html(f"""
+    st.html(f"""
     <div id="rzp-status-{key_suffix}" style="font-family:Inter,sans-serif;font-size:13px;color:#888;padding:8px 0">
       Opening secure checkout...
     </div>
     <script>
     (function() {{
         var status = document.getElementById("rzp-status-{key_suffix}");
-        // Streamlit runs components inside a sandboxed iframe. Razorpay opened from
-        // INSIDE that iframe cannot hand off to UPI apps on a phone (the sandbox
-        // blocks the upi:// / intent:// app launch), so only "enter UPI ID" worked.
-        // Run checkout from the parent page instead, like a normal website would.
+        // st.html(unsafe_allow_javascript=True) runs this in the main page (not a
+        // sandboxed iframe), so Razorpay can hand off to UPI apps on a phone.
         var P = window;
-        try {{ if (window.parent && window.parent.document && window.parent.document.body) P = window.parent; }} catch (e) {{ P = window; }}
 
         var options = {{
             "key": "{RAZORPAY_KEY_ID}",
@@ -408,7 +404,7 @@ def render_razorpay_checkout(subscription_id, email, key_suffix="", contact=""):
                 }}
             }},
             "handler": function (response) {{
-                status.innerHTML = "&#9989; Payment successful! It can take a few seconds to activate. Click <b>Refresh my Pro status</b> below.";
+                status.innerHTML = "&#9989; Payment successful! It can take a few seconds to activate. Click \\u003cb\\u003eRefresh my Pro status\\u003c/b\\u003e below.";
                 status.style.color = "#22c55e";
             }},
             "modal": {{
@@ -441,7 +437,7 @@ def render_razorpay_checkout(subscription_id, email, key_suffix="", contact=""):
         }}
     }})();
     </script>
-    """, height=80, scrolling=True)
+    """, unsafe_allow_javascript=True)
 
 def render_upgrade_cta(key_suffix):
     """Renders the Upgrade to Pro button + checkout flow. Call once per
