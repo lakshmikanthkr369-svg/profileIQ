@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ApiError, confirmSubscription, getMe, scoreResume, type Me, type ScoreResult } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import Rewrite from "./Rewrite";
@@ -27,6 +28,8 @@ export default function Dashboard() {
   // page scrollable: if nothing of ours has checkout open but the page is locked, unlock it; and if checkout
   // seems stuck (e.g. back from a UPI app) offer a one-tap way out.
   const [stuck, setStuck] = useState(false);
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => { setSlot(document.getElementById("header-slot")); }, []);
   useEffect(() => {
     unlockPage(true);
     const guard = setInterval(() => { if (!isCheckoutOpen() && pageIsLocked()) unlockPage(false); }, 600);
@@ -96,12 +99,11 @@ export default function Dashboard() {
 
   return (
     <>
-      <div className="topbar">
+      {slot && createPortal(
         <ProfileMenu me={me}
           onManage={() => setPanel(panel === "billing" ? "" : "billing")}
           onSupport={() => setPanel(panel === "support" ? "" : "support")}
-          onSignOut={() => supabase.auth.signOut()} />
-      </div>
+          onSignOut={() => supabase.auth.signOut()} />, slot)}
       {stuck && (
         <div className="notice warn" role="status"><strong>Payment screen not closing?</strong>
           If you finished (or cancelled) the payment, tap below to close it and check your plan.
@@ -122,20 +124,32 @@ export default function Dashboard() {
       {panel === "support" && <Support me={me} onClose={() => setPanel("")} />}
       {meError && <div className="err" role="alert">{meError}</div>}
       {me && !me.is_pro && (
-        <div className="card" style={{ margin: "12px 0" }}>
-          <strong>Go Pro</strong>
-          <p className="muted" style={{ margin: "6px 0 12px" }}>Unlimited scans, AI rewrite, fresher resume builder, 4 formats and PDF/Word downloads. Cancel any time.</p>
-          <Upgrade me={me} onUpgraded={setMe} />
+        <div className="card gopro">
+          <div><strong>Go Pro</strong>
+          <p className="muted" style={{ margin: "6px 0 0" }}>Unlimited scans, AI rewrite, fresher resume builder, 4 formats and PDF/Word downloads. Cancel any time.</p></div>
+          <div><Upgrade me={me} onUpgraded={setMe} /></div>
         </div>
       )}
-      <div className="tabs" role="tablist" style={{ marginTop: 12 }}>
+      <div className="tabs" role="tablist">
         <button role="tab" aria-selected={level === "existing"} className={level === "existing" ? "on" : ""} onClick={() => setLevel("existing")}>I&apos;m experienced</button>
         <button role="tab" aria-selected={level === "fresher"} className={level === "fresher" ? "on" : ""} onClick={() => setLevel("fresher")}>I&apos;m a fresher</button>
       </div>
 
-      <div className="grid2" style={{ marginTop: 4 }}>
-        {level === "existing" && (
-          <div>
+      {level === "fresher" ? (
+        <div className="stack">
+          <div className="inputs">
+            <div>
+              <h2>Job description</h2>
+              <textarea value={jd} onChange={(e) => setJd(e.target.value)} placeholder="Paste the full job description here — the more detail, the better the match." />
+            </div>
+          </div>
+          <Rewrite key="fresher" me={me} file={null} jd={jd} mode="fresher" onUpgraded={setMe} />
+        </div>
+      ) : (
+        <div className="workspace">
+          <div className="col-in">
+      <div className="inputs">
+        <div>
             <h2>Your resume</h2>
             {file && (
               <div className="file"><span>{file.name} · {(file.size / 1024).toFixed(0)} KB</span>
@@ -147,22 +161,20 @@ export default function Dashboard() {
               <input id="resume-input" ref={picker} type="file" accept=".pdf,.doc,.docx" onChange={(e) => choose(e.target.files?.[0])} />
             </label>
           </div>
-        )}
-        <div style={level === "fresher" ? { gridColumn: "1 / -1" } : undefined}>
+        <div>
           <h2>Job description</h2>
           <textarea value={jd} onChange={(e) => setJd(e.target.value)} placeholder="Paste the full job description here — the more detail, the better the match." />
         </div>
       </div>
 
-      {level === "fresher" ? (
-        <Rewrite key="fresher" me={me} file={null} jd={jd} mode="fresher" onUpgraded={setMe} />
-      ) : (<>
         {error && <div className="err" role="alert">{error.message}<small>Reference: {error.ref}</small></div>}
         {outOfScans && <div className="err">You have used all 3 free scans this month. Upgrade to Pro for unlimited scans — use the Go Pro button above.</div>}
         <button onClick={analyze} aria-busy={busy} disabled={busy || !!outOfScans}>{busy ? "Analyzing…" : "Score my resume"}</button>
 
-        {result && (
-          <div className="card" style={{ marginTop: 16 }} aria-live="polite">
+          </div>
+          <div className="col-out">
+        {result ? (
+          <div className="card" aria-live="polite">
             <div className="score">
               <div className="muted" style={{ fontSize: 12, letterSpacing: ".1em" }}>ATS SCORE</div>
               <div className="num" style={{ color: scoreColor }}>{result.score}</div>
@@ -177,11 +189,13 @@ export default function Dashboard() {
             <h2>Suggestions</h2>
             <ol className="sugs">{result.suggestions.map((s, i) => <li key={i}>{s}</li>)}</ol>
           </div>
+        ) : (
+          <div className="card placeholder"><strong>Your ATS score will appear here</strong><p className="muted">Upload your resume, paste the job description and tap Score my resume. You'll see matched keywords, what's missing and how to improve.</p></div>
         )}
-
-        <h2 style={{ marginTop: 24 }}>Improve it</h2>
-        <Rewrite key="existing" me={me} file={file} jd={jd} mode="existing" onUpgraded={setMe} />
-      </>)}
+        <h2 style={{ marginTop: 20 }}>Improve it</h2>
+        <Rewrite key="existing" me={me} file={file} jd={jd} mode="existing" onUpgraded={setMe} />          </div>
+        </div>
+      )}
     </>
   );
 }

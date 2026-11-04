@@ -20,7 +20,7 @@ export default function Home() {
     <main className="wrap">
       <header className="top">
         <div className="brand"><span className="mark">IQ</span><span>Profile<b>IQ</b></span></div>
-        <span className="pill" style={{ borderColor: "var(--amber)", color: "var(--amber)", background: "transparent" }}>AI Powered</span>
+        <span id="header-slot" style={{ display: "contents" }}>{!session && <span className="pill" style={{ borderColor: "var(--amber)", color: "var(--amber)", background: "transparent" }}>AI Powered</span>}</span>
       </header>
       {!configured && <div className="err">The app is not configured yet (missing Supabase settings).</div>}
       {!ready ? <p className="muted">Loading…</p> : session ? <Dashboard /> : (<>
