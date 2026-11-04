@@ -63,3 +63,11 @@
 .about-page .btn-primary { background:var(--amber); color:var(--dark); border:1px solid var(--amber); }
 .about-page .btn-ghost { background:transparent; color:#fff; border:1px solid var(--line); }
 .about-page .btn-ghost:hover { border-color:var(--amber); color:var(--amber); }
+
+.pmenu-list a[role="menuitem"] { display:flex; align-items:center; min-height:44px; padding:12px; border-radius:8px; color:var(--text); text-decoration:none; font-weight:600; font-size:14px; }
+.pmenu-list a[role="menuitem"]:hover, .pmenu-list a[role="menuitem"]:focus-visible { background:#262626; }
+.acct-page { max-width:760px; margin:0 auto; padding:28px 0 8px; }
+.acct-title { font-size:28px; font-weight:900; margin:0 0 16px; }
+.legal-top .pmenu { }
+@media (max-width:520px){ .legal-top .pmenu .pname { display:none; } }
+@media (max-width:520px){ .legal-top .pmenu .pill { display:none; } .legal-top .backbtn { padding:10px 12px; } .legal-top .row { gap:6px !important; } .legal-top .brand span:not(.mark) { font-size:17px; } }

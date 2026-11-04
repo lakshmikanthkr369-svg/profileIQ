@@ -5,7 +5,6 @@ import { ApiError, confirmSubscription, getMe, scoreResume, type Me, type ScoreR
 import { supabase } from "@/lib/supabase";
 import Rewrite from "./Rewrite";
 import Upgrade from "./Upgrade";
-import { Invoices, Subscription, Support } from "./Account";
 import ProfileMenu from "./ProfileMenu";
 import { PENDING_KEY, isCheckoutOpen, onCheckoutChange, pageIsLocked, unlockPage } from "@/lib/checkout";
 
@@ -21,7 +20,6 @@ export default function Dashboard() {
   const [result, setResult] = useState<ScoreResult | null>(null);
   const [level, setLevel] = useState<"existing" | "fresher">("existing");
   const picker = useRef<HTMLInputElement>(null);
-  const [panel, setPanel] = useState<"" | "billing" | "support">("");
   const [payNote, setPayNote] = useState("");
 
   // Scroll-lock guard. A fresh load can't have a payment running, so clear everything. After that, keep the
@@ -101,8 +99,6 @@ export default function Dashboard() {
     <>
       {slot && createPortal(
         <ProfileMenu me={me}
-          onManage={() => setPanel(panel === "billing" ? "" : "billing")}
-          onSupport={() => setPanel(panel === "support" ? "" : "support")}
           onSignOut={() => supabase.auth.signOut()} />, slot)}
       {stuck && (
         <div className="notice warn" role="status"><strong>Payment screen not closing?</strong>
@@ -120,11 +116,6 @@ export default function Dashboard() {
         <div className="notice bad" role="status"><strong>Your Pro subscription has ended</strong>
           It ended on {new Date(me.plan_ended_on).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}. Upgrade to get Pro features back.</div>
       )}
-      {panel && (
-        <button className="backbtn" onClick={() => { setPanel(""); window.scrollTo({ top: 0 }); }}>← Back to home</button>
-      )}
-      {panel === "billing" && (<><Subscription me={me} onChanged={setMe} /><Invoices /></>)}
-      {panel === "support" && <Support me={me} onClose={() => setPanel("")} />}
       {meError && <div className="err" role="alert">{meError}</div>}
       {me && !me.is_pro && (
         <div className="card gopro">
@@ -133,7 +124,7 @@ export default function Dashboard() {
           <div><Upgrade me={me} onUpgraded={setMe} /></div>
         </div>
       )}
-      {!panel && (<>
+      <>
       <div className="tabs" role="tablist">
         <button role="tab" aria-selected={level === "existing"} className={level === "existing" ? "on" : ""} onClick={() => setLevel("existing")}>I&apos;m experienced</button>
         <button role="tab" aria-selected={level === "fresher"} className={level === "fresher" ? "on" : ""} onClick={() => setLevel("fresher")}>I&apos;m a fresher</button>
@@ -200,7 +191,7 @@ export default function Dashboard() {
         <Rewrite key="existing" me={me} file={file} jd={jd} mode="existing" onUpgraded={setMe} />          </div>
         </div>
       )}
-      </>)}
+      </>
     </>
   );
 }

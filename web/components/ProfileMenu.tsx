@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import type { Me } from "@/lib/api";
 
-type Props = { me: Me | null; onManage: () => void; onSupport: () => void; onSignOut: () => void };
+type Props = { me: Me | null; onSignOut: () => void };
 
-export default function ProfileMenu({ me, onManage, onSupport, onSignOut }: Props) {
+export default function ProfileMenu({ me, onSignOut }: Props) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const name = me?.full_name?.trim() || me?.email?.split("@")[0] || "Account";
@@ -36,8 +37,8 @@ export default function ProfileMenu({ me, onManage, onSupport, onSignOut }: Prop
             <span>{me?.email}</span>
             {me && !me.is_pro && <span>{me.scans_left} free scans left</span>}
           </div>
-          {me?.has_billing && <button role="menuitem" onClick={pick(onManage)}>{me.is_pro ? "Manage plan" : "Billing & invoices"}</button>}
-          <button role="menuitem" onClick={pick(onSupport)}>Support</button>
+          {me?.has_billing && <Link role="menuitem" href="/account" onClick={() => setOpen(false)}>{me.is_pro ? "Manage plan" : "Billing & invoices"}</Link>}
+          <Link role="menuitem" href="/support" onClick={() => setOpen(false)}>Support</Link>
           <button role="menuitem" className="danger" onClick={pick(onSignOut)}>Sign out</button>
         </div>
       )}
