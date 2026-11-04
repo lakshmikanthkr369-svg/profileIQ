@@ -1,11 +1,12 @@
 """Pro subscription: create a Razorpay subscription, confirm it was paid, cancel at cycle end."""
+import html
 import re
 from datetime import datetime, timedelta, timezone
 
 import requests
 from fastapi import HTTPException
 
-from . import auth, config
+from . import auth, config, invoices
 
 RZP = "https://api.razorpay.com/v1"
 
@@ -71,9 +72,49 @@ def reconcile(user: dict, subscription_id: str) -> str:
     return "pending" if status in ("created", "authenticated", "pending") else "not_paid"
 
 
+def _fmt_date(iso: str | None) -> str:
+    try:
+        d = datetime.fromisoformat(str(iso).replace("Z", "+00:00")).astimezone(timezone(timedelta(hours=5, minutes=30)))
+        return d.strftime("%d %b %Y")
+    except (ValueError, TypeError):
+        return "the end of your current period"
+
+
+def _notify_cancellation(user: dict, profile: dict | None, sub_id: str) -> None:
+    """Tells the owner (with the user's details) and confirms to the user. Never blocks or fails the cancel."""
+    p = profile or {}
+    name = p.get("full_name") or user.get("full_name") or "—"
+    phone = p.get("phone") or user.get("mobile") or "—"
+    ends = _fmt_date(p.get("pro_expires_at"))
+    when = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %Y, %I:%M %p IST")
+    e = html.escape
+    rows = [("Name", name), ("Email", user["email"]), ("Mobile", phone), ("User ID", user["id"]),
+            ("Subscription ID", sub_id), ("Cancelled at", when), ("Pro access until", ends)]
+    table = "".join(f"<tr><td style='padding:4px 12px 4px 0;color:#666'>{e(k)}</td><td><b>{e(str(v))}</b></td></tr>" for k, v in rows)
+    try:
+        invoices._send_email({
+            "from": "ProfileIQ <noreply@profileiq.co.in>", "to": [config.OWNER_NOTIFY_EMAIL], "reply_to": user["email"],
+            "subject": f"[ProfileIQ] Subscription cancelled - {user['email']}"[:200],
+            "html": f"<p><b>A subscriber cancelled their ProfileIQ Pro plan.</b> Renewal is switched off; they keep Pro until {e(ends)}.</p><table>{table}</table>",
+        }, f"cancel-owner-{sub_id}")
+        invoices._send_email({
+            "from": config.INVOICE_FROM, "to": [user["email"]], "reply_to": config.SUPPORT_EMAIL,
+            "subject": "Your ProfileIQ subscription is cancelled",
+            "html": (f"<p>Hi {e(name) if name != '—' else 'there'},</p>"
+                     f"<p>We've cancelled your ProfileIQ Pro subscription. It <b>won't renew</b>, and you'll keep Pro until <b>{e(ends)}</b>.</p>"
+                     f"<p>Changed your mind? You can upgrade again any time from the app. If you have feedback on why you left, just reply to this email.</p>"
+                     f"<p>— Team ProfileIQ</p>"),
+        }, f"cancel-user-{sub_id}")
+    except Exception:  # an email problem must never undo or fail a cancellation
+        pass
+
+
 def cancel(user: dict, profile: dict | None) -> None:
     sid = (profile or {}).get("razorpay_subscription_id")
     if not sid or not auth.is_pro(profile):
         raise HTTPException(409, {"message": "There is no active subscription to cancel.", "ref": "no-sub"})
+    if (profile or {}).get("subscription_status") == "cancel_at_cycle_end":
+        raise HTTPException(409, {"message": "This subscription is already cancelled.", "ref": "already-cancelled"})
     _rzp("POST", f"/subscriptions/{sid}/cancel", json={"cancel_at_cycle_end": 1})
     _patch_profile(user["id"], {"subscription_status": "cancel_at_cycle_end"})
+    _notify_cancellation(user, profile, sid)

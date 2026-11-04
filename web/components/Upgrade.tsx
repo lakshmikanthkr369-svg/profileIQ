@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { ApiError, confirmSubscription, getMe, startSubscription, type Me, type Subscribe } from "@/lib/api";
 import { normalizeIndianMobile } from "@/lib/validate";
+import { PENDING_KEY, setCheckoutOpen, unlockPage } from "@/lib/checkout";
 
 declare global {
   interface Window {
@@ -18,19 +19,6 @@ function loadCheckout(): Promise<void> {
     s.onerror = () => reject(new Error("load"));
     document.head.appendChild(s);
   });
-}
-
-export const PENDING_KEY = "piq_pending_sub";
-/** Razorpay locks page scrolling while checkout is open and, on some phones (UPI app hand-off), forgets to
- *  unlock it or leaves its full-screen layer behind. Put the page back to normal. */
-export function unlockPage(removeLayer = true) {
-  try {
-    for (const el of [document.documentElement, document.body]) {
-      el.style.overflow = ""; el.style.position = ""; el.style.height = ""; el.style.top = ""; el.style.touchAction = "";
-    }
-    document.body.classList.remove("razorpay-checkout-open");
-    if (removeLayer) document.querySelectorAll(".razorpay-container, iframe.razorpay-checkout-frame").forEach((n) => n.remove());
-  } catch { /* nothing to undo */ }
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -76,6 +64,7 @@ export default function Upgrade({ me, onUpgraded, label = "Upgrade to Pro â€” â‚
         modal: { ondismiss: () => { unlockPage(); setBusy(false); setMsg("Checkout closed. Tap Upgrade to try again."); } },
       });
       rzp.on("payment.failed", (r) => { unlockPage(); setBusy(false); setError({ message: `Payment failed: ${r.error.description}`, ref: "payment-failed" }); });
+      setCheckoutOpen(true);
       rzp.open();
       setBusy(false);
     } catch (e) {

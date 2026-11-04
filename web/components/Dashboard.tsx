@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import Rewrite from "./Rewrite";
 import Upgrade from "./Upgrade";
 import { Invoices, Subscription, Support } from "./Account";
-import { PENDING_KEY, unlockPage } from "./Upgrade";
+import { PENDING_KEY, isCheckoutOpen, onCheckoutChange, pageIsLocked, unlockPage } from "@/lib/checkout";
 
 const MAX_MB = 10;
 
@@ -22,16 +22,20 @@ export default function Dashboard() {
   const [panel, setPanel] = useState<"" | "billing" | "support">("");
   const [payNote, setPayNote] = useState("");
 
-  // Coming back from a UPI app: make sure the page can scroll and nothing from checkout is left covering it.
+  // Scroll-lock guard. A fresh load can't have a payment running, so clear everything. After that, keep the
+  // page scrollable: if nothing of ours has checkout open but the page is locked, unlock it; and if checkout
+  // seems stuck (e.g. back from a UPI app) offer a one-tap way out.
+  const [stuck, setStuck] = useState(false);
   useEffect(() => {
-    // On a fresh page load nothing from checkout can still be running, so clear everything. When the tab
-    // merely comes back to the foreground, only fix scrolling (a payment may still be in progress).
     unlockPage(true);
-    const back = () => unlockPage(false);
-    const vis = () => { if (document.visibilityState === "visible") unlockPage(false); };
+    const guard = setInterval(() => { if (!isCheckoutOpen() && pageIsLocked()) unlockPage(false); }, 600);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const off = onCheckoutChange((o) => { clearTimeout(timer); setStuck(false); if (o) timer = setTimeout(() => setStuck(true), 25000); });
+    const back = () => { if (!isCheckoutOpen()) unlockPage(false); };
+    const vis = () => { if (document.visibilityState === "visible") { back(); if (isCheckoutOpen()) setTimeout(() => setStuck(true), 4000); } };
     window.addEventListener("pageshow", back);
     document.addEventListener("visibilitychange", vis);
-    return () => { window.removeEventListener("pageshow", back); document.removeEventListener("visibilitychange", vis); };
+    return () => { clearInterval(guard); clearTimeout(timer); off(); window.removeEventListener("pageshow", back); document.removeEventListener("visibilitychange", vis); };
   }, []);
 
   useEffect(() => {
@@ -53,7 +57,7 @@ export default function Dashboard() {
       setPayNote("Checking your payment…");
       for (let i = 0; i < 8 && !stop; i++) {
         const r = await confirmSubscription(pending!.id).catch(() => null);
-        if (r?.status === "paid") { clear(); unlockPage(); setMe(await getMe()); setPayNote("Payment received — you're Pro now. Enjoy!"); return; }
+        if (r?.status === "paid") { clear(); unlockPage(true); setMe(await getMe()); setPayNote("Payment received — you're Pro now. Enjoy!"); return; }
         if (r?.status === "not_paid") { clear(); setPayNote(""); return; }
         await new Promise((res) => setTimeout(res, 2500));
       }
@@ -103,6 +107,13 @@ export default function Dashboard() {
           <button className="ghost" onClick={() => supabase.auth.signOut()}>Sign out</button>
         </div>
       </div>
+      {stuck && (
+        <div className="notice warn" role="status"><strong>Payment screen not closing?</strong>
+          If you finished (or cancelled) the payment, tap below to close it and check your plan.
+          <div style={{ height: 10 }} />
+          <button onClick={async () => { unlockPage(true); setStuck(false); try { setMe(await getMe()); } catch { /* keep current */ } window.scrollTo({ top: 0 }); }}>Close and check my payment</button>
+        </div>
+      )}
       {payNote && <div className="ok" role="status">{payNote}</div>}
       {me?.is_pro && me.cancels_at_period_end && me.pro_expires_at && (
         <div className="notice warn" role="status"><strong>Your subscription is cancelled</strong>

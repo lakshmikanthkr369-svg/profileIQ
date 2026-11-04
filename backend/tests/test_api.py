@@ -328,3 +328,28 @@ def test_me_reports_ended_plan_and_cancel_state(client):
     client.state["profile"].update(pro_expires_at=FUTURE, subscription_status="cancel_at_cycle_end")
     d = client.get("/v1/me").json()
     assert d["is_pro"] is True and d["cancels_at_period_end"] is True and d["plan_ended_on"] is None
+
+
+def test_cancel_emails_owner_with_user_details_and_confirms_to_user(client, monkeypatch):
+    from app import billing, invoices
+    _fake_rzp(monkeypatch)
+    sent = []
+    monkeypatch.setattr(invoices, "_send_email", lambda p, k: sent.append(p) or True)
+    monkeypatch.setattr(billing.config, "OWNER_NOTIFY_EMAIL", "owner@x.com")
+    client.state["profile"].update(plan="pro", pro_expires_at=FUTURE, razorpay_subscription_id="sub_123",
+                                   full_name="Asha <b>K</b>", phone="9876543210")
+    assert client.post("/v1/billing/cancel").status_code == 200
+    owner = [m for m in sent if m["to"] == ["owner@x.com"]][0]
+    assert "9876543210" in owner["html"] and "sub_123" in owner["html"] and "&lt;b&gt;" in owner["html"] and "<b>K</b>" not in owner["html"]
+    user_mail = [m for m in sent if m["to"] != ["owner@x.com"]][0]
+    assert "won't renew" in user_mail["html"]
+    client.state["profile"]["subscription_status"] = "cancel_at_cycle_end"
+    assert client.post("/v1/billing/cancel").status_code == 409       # already cancelled: no second email
+
+
+def test_cancel_succeeds_even_if_email_breaks(client, monkeypatch):
+    from app import invoices
+    _fake_rzp(monkeypatch)
+    monkeypatch.setattr(invoices, "_send_email", lambda p, k: (_ for _ in ()).throw(RuntimeError("boom")))
+    client.state["profile"].update(plan="pro", pro_expires_at=FUTURE, razorpay_subscription_id="sub_123")
+    assert client.post("/v1/billing/cancel").status_code == 200
