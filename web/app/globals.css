@@ -88,3 +88,9 @@ button[aria-busy="true"] { cursor:progress; }
   .gopro { grid-template-columns:1fr minmax(280px, 360px); align-items:center; gap:28px; }
   .stack { max-width:900px; margin:0 auto; }
 }
+
+.foot { margin-top:48px; padding:20px 0 28px; border-top:1px solid var(--line); text-align:center; font-size:13px; color:var(--muted); }
+.foot nav { display:flex; flex-wrap:wrap; justify-content:center; gap:6px 22px; margin-bottom:10px; }
+.foot a { color:var(--muted); text-decoration:none; padding:8px 0; display:inline-block; }
+.foot a:hover, .foot a:focus-visible { color:var(--amber); text-decoration:underline; }
+.foot p { margin:0; }

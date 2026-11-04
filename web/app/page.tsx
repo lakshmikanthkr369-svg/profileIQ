@@ -28,6 +28,16 @@ export default function Home() {
         <p className="muted" style={{ marginBottom: 20 }}>ProfileIQ scores your resume against any job description, shows every gap, and rewrites it to pass ATS — in under 30 seconds.</p>
         <AuthForm />
       </>)}
+      <footer className="foot">
+        <nav aria-label="Footer">
+          <a href="https://profileiq.co.in/about.html">About Us</a>
+          <a href="https://profileiq.co.in/privacy.html">Privacy Policy</a>
+          <a href="https://profileiq.co.in/terms.html">Terms</a>
+          <a href="https://profileiq.co.in/refund.html">Refund Policy</a>
+          <a href="mailto:support@profileiq.co.in">Contact</a>
+        </nav>
+        <p>© {new Date().getFullYear()} ProfileIQ. All rights reserved.</p>
+      </footer>
     </main>
   );
 }
