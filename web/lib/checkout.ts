@@ -19,12 +19,16 @@ export function pageIsLocked(): boolean {
  *  hand-off), can forget to unlock it or leave its full-screen layer behind. */
 export function unlockPage(removeLayer = true) {
   try {
-    for (const el of [document.documentElement, document.body]) {
-      el.style.setProperty("overflow", "visible", "important");
-      el.style.setProperty("overflow-y", "auto", "important");
-      el.style.setProperty("position", "static", "important");
-      el.style.setProperty("height", "auto", "important");
-      el.style.setProperty("touch-action", "auto", "important");
+    // First drop whatever the payment screen set directly on the page, so a normal page is left untouched.
+    const html = document.documentElement, body = document.body;
+    for (const el of [html, body]) for (const p of ["overflow", "overflow-x", "overflow-y", "position", "height", "top", "touch-action"]) el.style.removeProperty(p);
+    // Only if something in a stylesheet still locks it, force it open. The page (html) is the one scroller;
+    // body must NOT scroll on its own, or phones get a second nested scroller and the page sticks.
+    if (pageIsLocked()) {
+      html.style.setProperty("overflow-y", "auto", "important");
+      body.style.setProperty("overflow", "visible", "important");
+      body.style.setProperty("position", "static", "important");
+      body.style.setProperty("touch-action", "auto", "important");
     }
     document.body.classList.remove("razorpay-checkout-open");
     if (removeLayer) {
