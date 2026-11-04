@@ -53,10 +53,19 @@ input:-webkit-autofill { animation-name: piqAutofill; animation-duration: 1ms; -
 select { width:100%; background:#111; color:var(--text); border:1px solid var(--line); border-radius:10px; padding:12px 14px; font:inherit; font-size:16px; }
 
 /* Header: email on its own line, buttons wrap below on phones (no sideways overflow) */
-.topbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 12px; margin-bottom:8px; }
-.topbar .who { flex:1 1 220px; min-width:0; overflow-wrap:anywhere; }
-.topbar .actions { display:flex; flex-wrap:wrap; gap:8px; }
-.topbar .actions button { width:auto; min-height:40px; padding:8px 14px; }
+.topbar { display:flex; justify-content:flex-end; margin-bottom:8px; }
+.pmenu { position:relative; max-width:100%; }
+.pmenu-btn { display:flex; align-items:center; gap:8px; width:auto; min-height:44px; padding:5px 12px 5px 6px; border-radius:999px; background:var(--card); color:var(--text); border:1px solid var(--line); text-transform:none; letter-spacing:0; font-weight:600; font-size:14px; }
+.pmenu-btn:hover { border-color:var(--amber); }
+.pmenu .avatar { width:32px; height:32px; border-radius:50%; background:var(--amber); color:var(--ink); display:grid; place-items:center; font-weight:900; font-size:15px; flex:none; }
+.pmenu .pname { max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pmenu .caret { font-size:11px; opacity:.7; }
+.pmenu-list { position:absolute; right:0; top:calc(100% + 8px); z-index:20; width:min(280px, calc(100vw - 32px)); background:var(--card); border:1px solid var(--line); border-radius:14px; padding:6px; box-shadow:0 12px 32px rgba(0,0,0,.55); }
+.pmenu-head { display:flex; flex-direction:column; gap:2px; padding:10px 12px 12px; border-bottom:1px solid var(--line); margin-bottom:6px; font-size:12px; color:var(--muted); overflow-wrap:anywhere; }
+.pmenu-head strong { color:var(--text); font-size:15px; }
+.pmenu-list button { width:100%; text-align:left; background:none; border:none; color:var(--text); border-radius:8px; padding:12px; min-height:44px; text-transform:none; letter-spacing:0; font-weight:600; font-size:14px; }
+.pmenu-list button:hover, .pmenu-list button:focus-visible { background:#262626; }
+.pmenu-list button.danger { color:var(--bad); }
 
 /* Loader on any button that is working */
 @keyframes piqspin { to { transform: rotate(360deg); } }

@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import Rewrite from "./Rewrite";
 import Upgrade from "./Upgrade";
 import { Invoices, Subscription, Support } from "./Account";
+import ProfileMenu from "./ProfileMenu";
 import { PENDING_KEY, isCheckoutOpen, onCheckoutChange, pageIsLocked, unlockPage } from "@/lib/checkout";
 
 const MAX_MB = 10;
@@ -96,16 +97,10 @@ export default function Dashboard() {
   return (
     <>
       <div className="topbar">
-        <div className="who">
-          <strong>{me?.email ?? "…"}</strong>{" "}
-          {me?.is_pro && <span className="pill">PRO</span>}
-          {me && !me.is_pro && <span className="muted" style={{ fontSize: 12 }}> · {me.scans_left} free scans left</span>}
-        </div>
-        <div className="actions">
-          {me?.has_billing && <button className="ghost" onClick={() => setPanel(panel === "billing" ? "" : "billing")}>{me.is_pro ? "Manage" : "Billing"}</button>}
-          <button className="ghost" onClick={() => setPanel(panel === "support" ? "" : "support")}>Support</button>
-          <button className="ghost" onClick={() => supabase.auth.signOut()}>Sign out</button>
-        </div>
+        <ProfileMenu me={me}
+          onManage={() => setPanel(panel === "billing" ? "" : "billing")}
+          onSupport={() => setPanel(panel === "support" ? "" : "support")}
+          onSignOut={() => supabase.auth.signOut()} />
       </div>
       {stuck && (
         <div className="notice warn" role="status"><strong>Payment screen not closing?</strong>
