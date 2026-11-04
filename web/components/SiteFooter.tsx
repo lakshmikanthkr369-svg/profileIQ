@@ -8,7 +8,7 @@ export default function SiteFooter() {
         <Link href="/privacy">Privacy Policy</Link>
         <Link href="/terms">Terms</Link>
         <Link href="/refund">Refund Policy</Link>
-        <a href="mailto:support@profileiq.co.in">Contact</a>
+        <Link href="/contact">Contact Us</Link>
       </nav>
       <p>© {new Date().getFullYear()} ProfileIQ. All rights reserved.</p>
     </footer>
