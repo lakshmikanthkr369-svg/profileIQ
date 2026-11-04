@@ -120,6 +120,9 @@ export default function Dashboard() {
         <div className="notice bad" role="status"><strong>Your Pro subscription has ended</strong>
           It ended on {new Date(me.plan_ended_on).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}. Upgrade to get Pro features back.</div>
       )}
+      {panel && (
+        <button className="backbtn" onClick={() => { setPanel(""); window.scrollTo({ top: 0 }); }}>← Back to home</button>
+      )}
       {panel === "billing" && (<><Subscription me={me} onChanged={setMe} /><Invoices /></>)}
       {panel === "support" && <Support me={me} onClose={() => setPanel("")} />}
       {meError && <div className="err" role="alert">{meError}</div>}
@@ -130,6 +133,7 @@ export default function Dashboard() {
           <div><Upgrade me={me} onUpgraded={setMe} /></div>
         </div>
       )}
+      {!panel && (<>
       <div className="tabs" role="tablist">
         <button role="tab" aria-selected={level === "existing"} className={level === "existing" ? "on" : ""} onClick={() => setLevel("existing")}>I&apos;m experienced</button>
         <button role="tab" aria-selected={level === "fresher"} className={level === "fresher" ? "on" : ""} onClick={() => setLevel("fresher")}>I&apos;m a fresher</button>
@@ -196,6 +200,7 @@ export default function Dashboard() {
         <Rewrite key="existing" me={me} file={file} jd={jd} mode="existing" onUpgraded={setMe} />          </div>
         </div>
       )}
+      </>)}
     </>
   );
 }
