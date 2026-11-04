@@ -28,6 +28,13 @@ const securityHeaders = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   poweredByHeader: false,
-  async headers() { return [{ source: "/:path*", headers: securityHeaders }]; },
+  async headers() {
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      // Pages are prebuilt (instant, and prefetched on hover/scroll) but the browser re-checks them on every visit,
+      // so a phone never keeps a page that points at files from an older deploy. Hashed assets stay cached.
+      { source: "/((?!_next/static|_next/image|.*\\..*).*)", headers: [{ key: "Cache-Control", value: "no-cache, must-revalidate" }] },
+    ];
+  },
 };
 export default nextConfig;

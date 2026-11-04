@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { getMe, type Me } from "@/lib/api";
+import { getMe, peekMe, type Me } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { Invoices, Subscription, Support } from "./Account";
 import ProfileMenu from "./ProfileMenu";
@@ -11,9 +11,9 @@ import SiteFooter from "./SiteFooter";
 // Separate pages for "Manage plan" (/account) and "Support" (/support). Both need a signed-in user.
 export default function AccountPage({ kind }: { kind: "account" | "support" }) {
   const router = useRouter();
-  const [me, setMe] = useState<Me | null>(null);
+  const [me, setMe] = useState<Me | null>(peekMe());
   const [error, setError] = useState("");
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(peekMe() !== null);
 
   useEffect(() => {
     let alive = true;

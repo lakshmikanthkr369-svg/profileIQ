@@ -6,8 +6,6 @@ export const metadata: Metadata = {
   title: "ProfileIQ — AI Resume Intelligence",
   description: "Score your resume against any job description and see exactly which keywords you're missing.",
 };
-// Always serve fresh HTML so a phone never keeps a page that points at files from an older deploy.
-export const dynamic = "force-dynamic";
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#0e0e0e" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

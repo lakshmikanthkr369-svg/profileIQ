@@ -32,7 +32,11 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 export interface Me { id: string; email: string; full_name?: string | null; is_pro: boolean; scans_left: number | null; pro_expires_at: string | null; cancels_at_period_end?: boolean; has_billing?: boolean; plan_ended_on?: string | null; has_mobile?: boolean }
 export interface ScoreResult { score: number; matched: string[]; missing: string[]; suggestions: string[]; scans_left: number | null }
 
-export const getMe = () => api<Me>("/v1/me");
+// Remember the last profile so moving between pages shows it instantly while a fresh copy loads.
+let meCache: Me | null = null;
+export const peekMe = () => meCache;
+export const getMe = () => api<Me>("/v1/me").then((m) => (meCache = m));
+if (typeof window !== "undefined") supabase.auth.onAuthStateChange((e) => { if (e === "SIGNED_OUT") meCache = null; });
 export function scoreResume(file: File, jd: string) {
   const form = new FormData(); form.append("resume", file); form.append("jd", jd);
   return api<ScoreResult>("/v1/score", { method: "POST", body: form });

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ApiError, confirmSubscription, getMe, scoreResume, type Me, type ScoreResult } from "@/lib/api";
+import { ApiError, confirmSubscription, getMe, peekMe, scoreResume, type Me, type ScoreResult } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import Rewrite from "./Rewrite";
 import Upgrade from "./Upgrade";
@@ -11,7 +11,7 @@ import { PENDING_KEY, isCheckoutOpen, onCheckoutChange, pageIsLocked, unlockPage
 const MAX_MB = 10;
 
 export default function Dashboard() {
-  const [me, setMe] = useState<Me | null>(null);
+  const [me, setMe] = useState<Me | null>(peekMe());
   const [meError, setMeError] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [jd, setJd] = useState("");
