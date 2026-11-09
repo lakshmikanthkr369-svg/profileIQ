@@ -1,4 +1,4 @@
-"""Owner-only admin API: look up users and subscriptions, correct a user's name / email / mobile.
+"""Owner-only admin API: look up users and subscriptions, correct a user's name / mobile (email is read-only).
 Every route requires a signed-in user whose email is in ADMIN_EMAILS. The browser never touches the
 database directly; this uses the server's service key, like the rest of the API."""
 import re
@@ -13,7 +13,6 @@ from .limits import check_rate
 
 LIST_COLS = "id,email,full_name,phone,plan,subscription_status,pro_expires_at,created_at,razorpay_subscription_id"
 DETAIL_COLS = LIST_COLS + ",razorpay_customer_id,scans_used,scans_reset_date,pro_started_at"
-EMAIL_RE = re.compile(r"^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]{2,}$")
 FILTERS = ("all", "active", "cancelled", "free")
 
 
@@ -105,11 +104,6 @@ def clean_changes(body: dict) -> dict:
         if not (2 <= len(n) <= 80) or re.search(r"[<>\x00-\x1f]", n):
             raise HTTPException(422, {"message": "Name must be 2–80 characters with no special symbols like < >.", "ref": "bad-name"})
         out["full_name"] = n
-    if body.get("email") is not None:
-        e = str(body["email"]).strip().lower()
-        if len(e) > 254 or not EMAIL_RE.match(e):
-            raise HTTPException(422, {"message": "Please enter a valid email address.", "ref": "bad-email"})
-        out["email"] = e
     if body.get("phone") is not None and str(body["phone"]).strip():
         ph = billing.normalize_mobile(str(body["phone"]))
         if not ph:
@@ -135,7 +129,7 @@ def update_user(admin: dict, user_id: str, body: dict) -> dict:
     # Razorpay keeps its own copy of the customer, used on its receipts and emails.
     cid = current.get("razorpay_customer_id")
     if cid and config.RAZORPAY_KEY_ID and config.RAZORPAY_KEY_SECRET:
-        payload = {k: v for k, v in {"name": changes.get("full_name"), "email": changes.get("email"),
+        payload = {k: v for k, v in {"name": changes.get("full_name"),
                                      "contact": f"+91{changes['phone']}" if changes.get("phone") else None}.items() if v}
         try:
             rr = requests.put(f"{billing.RZP}/customers/{cid}", json=payload, timeout=20,

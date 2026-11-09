@@ -413,16 +413,16 @@ def test_admin_user_detail_and_status(adm):
 
 
 def test_admin_edit_updates_profile_and_razorpay(adm):
-    r = adm.patch(f"/v1/admin/users/{UID}", json={"full_name": "  Divya   Gowda ", "email": "New@Mail.com"})
+    r = adm.patch(f"/v1/admin/users/{UID}", json={"full_name": "  Divya   Gowda ", "phone": "98765 11111"})
     assert r.status_code == 200
     j = r.json()
-    assert j["user"]["full_name"] == "Divya Gowda" and j["user"]["email"] == "new@mail.com"
-    assert j["razorpay_updated"] is True and j["auth_updated"] is True and j["changed"] == ["email", "full_name"]
-    assert adm.db["rzp"][0][1] == {"name": "Divya Gowda", "email": "new@mail.com"}
+    assert j["user"]["full_name"] == "Divya Gowda" and j["user"]["phone"] == "9876511111" and j["user"]["email"] == "d@x.com"
+    assert j["razorpay_updated"] is True and j["auth_updated"] is True and j["changed"] == ["full_name", "phone"]
+    assert adm.db["rzp"][0][1] == {"name": "Divya Gowda", "contact": "+919876511111"}
 
 
 def test_admin_edit_validation(adm):
-    for body, ref in [({"email": "nope"}, "bad-email"), ({"full_name": "<b>"}, "bad-name"), ({"phone": "123"}, "bad-mobile"), ({}, "no-change")]:
+    for body, ref in [({"email": "x@y.com"}, "no-change"), ({"full_name": "<b>"}, "bad-name"), ({"phone": "123"}, "bad-mobile"), ({}, "no-change")]:
         r = adm.patch(f"/v1/admin/users/{UID}", json=body)
         assert r.status_code == 422 and r.json()["ref"] == ref
     assert adm.patch(f"/v1/admin/users/{UID}", json={"full_name": "Divya"}).json()["ref"] == "no-change"

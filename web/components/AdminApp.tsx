@@ -138,20 +138,19 @@ function Bar({ who, onSignOut, back }: { who: string; onSignOut: () => void; bac
 
 function Detail({ id, who, onBack, onSignOut }: { id: string; who: string; onBack: () => void; onSignOut: () => void }) {
   const [u, setU] = useState<AdminUser | null>(null); const [inv, setInv] = useState<AdminInvoice[]>([]);
-  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [phone, setPhone] = useState("");
+  const [name, setName] = useState(""); const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false); const [err, setErr] = useState(""); const [res, setRes] = useState<AdminEditResult | null>(null);
 
-  const fill = (x: AdminUser) => { setU(x); setName(x.full_name ?? ""); setEmail(x.email ?? ""); setPhone(x.phone ?? ""); };
+  const fill = (x: AdminUser) => { setU(x); setName(x.full_name ?? ""); setPhone(x.phone ?? ""); };
   useEffect(() => { adminUser(id).then((r) => { fill(r.user); setInv(r.invoices); }).catch((e) => setErr((e as ApiError).message)); }, [id]);
 
-  const dirty = !!u && (name.trim() !== (u.full_name ?? "") || email.trim().toLowerCase() !== (u.email ?? "") || phone.trim() !== (u.phone ?? ""));
+  const dirty = !!u && (name.trim() !== (u.full_name ?? "") || phone.trim() !== (u.phone ?? ""));
 
   async function save(e: React.FormEvent) {
     e.preventDefault(); if (!u || busy || !dirty) return;
     setBusy(true); setErr(""); setRes(null);
-    const body: { full_name?: string; email?: string; phone?: string } = {};
+    const body: { full_name?: string; phone?: string } = {};
     if (name.trim() !== (u.full_name ?? "")) body.full_name = name;
-    if (email.trim().toLowerCase() !== (u.email ?? "")) body.email = email;
     if (phone.trim() !== (u.phone ?? "") && phone.trim()) body.phone = phone;
     try { const r = await adminUpdate(id, body); setRes(r); fill({ ...u, ...r.user }); }
     catch (x) { setErr((x as ApiError).message); }
@@ -166,10 +165,10 @@ function Detail({ id, who, onBack, onSignOut }: { id: string; who: string; onBac
         <div className="adm-detail">
           <section className="card">
             <h2 className="adm-h">Contact details</h2>
-            <p className="muted" style={{ fontSize: 13, margin: "0 0 4px" }}>These are used in invoices, subscription and cancellation emails, and on the Razorpay customer record.</p>
+            <p className="muted" style={{ fontSize: 13, margin: "0 0 4px" }}>The name and mobile are used in invoices, subscription and cancellation emails, and on the Razorpay customer record.</p>
             <form onSubmit={save}>
               <label htmlFor="n">Name</label><input id="n" type="text" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" />
-              <label htmlFor="m">Email</label><input id="m" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" />
+              <label htmlFor="m">Email (cannot be changed)</label><input id="m" type="email" value={u.email ?? ""} readOnly disabled />
               <label htmlFor="p">Mobile</label><input id="p" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="off" placeholder="10-digit mobile" />
               {err && <div className="err" role="alert">{err}</div>}
               {res && (
@@ -181,7 +180,7 @@ function Detail({ id, who, onBack, onSignOut }: { id: string; who: string; onBac
                 </div>
               )}
               <button type="submit" disabled={!dirty || busy} aria-busy={busy} style={{ marginTop: 16 }}>{busy ? "Saving…" : "Save changes"}</button>
-              <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>The email they log in with is not changed here — only the contact email used for notifications.</p>
+              <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Email is read-only: it is the address the user logs in with and receives notifications on.</p>
             </form>
           </section>
           <section className="card">

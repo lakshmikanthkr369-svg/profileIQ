@@ -115,5 +115,5 @@ export const adminStats = () => api<{ total: number; active: number; cancelled: 
 export const adminUsers = (q: string, filter: string, offset = 0) =>
   api<{ users: AdminUser[]; has_more: boolean }>(`/v1/admin/users?q=${encodeURIComponent(q)}&filter=${filter}&offset=${offset}`);
 export const adminUser = (id: string) => api<{ user: AdminUser; invoices: AdminInvoice[] }>(`/v1/admin/users/${id}`);
-export const adminUpdate = (id: string, body: { full_name?: string; email?: string; phone?: string }) =>
+export const adminUpdate = (id: string, body: { full_name?: string; phone?: string }) =>
   api<AdminEditResult>(`/v1/admin/users/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });

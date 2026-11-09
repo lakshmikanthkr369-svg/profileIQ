@@ -297,7 +297,6 @@ def admin_user(user_id: str, a: dict = Depends(admin.require_admin)):
 
 class AdminUserEdit(BaseModel):
     full_name: str | None = None
-    email: str | None = None
     phone: str | None = None
 
 
