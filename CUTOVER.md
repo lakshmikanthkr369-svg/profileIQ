@@ -30,3 +30,8 @@ Point `app.profileiq.co.in` back at the Streamlit service. Data is shared (same 
 - [ ] Rotate leaked keys (step 1 above)  - owner action
 - [ ] Real-device payment test on the registered domain - after cutover step 1
 - [ ] Rate limits are per server process (fine for one replica; move to Redis if you scale out)
+
+## Admin page (/admin)
+- URL: `https://app.profileiq.co.in/admin` (not linked anywhere, `noindex`).
+- Only emails in the `ADMIN_EMAILS` variable on the **striking-harmony** (backend) service can sign in (default: `lakshmikanthkr3@gmail.com`; comma-separate to add more). Everyone else is refused by the server, not just hidden.
+- Edits change `profiles.full_name / email / phone`, the Razorpay customer record, and the name stored with the login. Invoice and new-subscriber emails (Edge Function) and cancellation emails read the profile, so they pick up the corrected details. The user's login email is NOT changed.

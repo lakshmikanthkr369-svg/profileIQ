@@ -100,3 +100,20 @@ export interface Invoice { id: number; invoice_number: string; issued_at: string
 export const listInvoices = () => api<{ invoices: Invoice[] }>("/v1/invoices");
 export const emailInvoice = (id: number) => post<{ sent_to: string }>(`/v1/invoices/${id}/email`);
 export const sendSupport = (type: string, message: string) => post<{ ok: boolean }>("/v1/support", { type, message });
+
+// ── Owner-only admin ──
+export interface AdminUser {
+  id: string; email: string | null; full_name: string | null; phone: string | null; plan: string | null;
+  subscription_status: string | null; pro_expires_at: string | null; created_at: string;
+  razorpay_subscription_id: string | null; razorpay_customer_id?: string | null; scans_used?: number;
+  status: "free" | "active" | "cancelled" | "expired";
+}
+export interface AdminInvoice { id: number; invoice_number: string | null; issued_at: string; amount_paise: number; currency: string; payment_method: string | null; emailed_at: string | null; customer_name: string | null; customer_email: string | null }
+export interface AdminEditResult { user: AdminUser; changed: string[]; razorpay_updated: boolean | null; auth_updated: boolean | null }
+export const adminMe = () => api<{ ok: boolean; email: string }>("/v1/admin/me");
+export const adminStats = () => api<{ total: number; active: number; cancelled: number }>("/v1/admin/stats");
+export const adminUsers = (q: string, filter: string, offset = 0) =>
+  api<{ users: AdminUser[]; has_more: boolean }>(`/v1/admin/users?q=${encodeURIComponent(q)}&filter=${filter}&offset=${offset}`);
+export const adminUser = (id: string) => api<{ user: AdminUser; invoices: AdminInvoice[] }>(`/v1/admin/users/${id}`);
+export const adminUpdate = (id: string, body: { full_name?: string; email?: string; phone?: string }) =>
+  api<AdminEditResult>(`/v1/admin/users/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });

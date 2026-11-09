@@ -88,17 +88,18 @@ def _notify_cancellation(user: dict, profile: dict | None, sub_id: str) -> None:
     ends = _fmt_date(p.get("pro_expires_at"))
     when = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%d %b %Y, %I:%M %p IST")
     e = html.escape
-    rows = [("Name", name), ("Email", user["email"]), ("Mobile", phone), ("User ID", user["id"]),
+    email = p.get("email") or user["email"]   # the address on the profile (admin-corrected) wins
+    rows = [("Name", name), ("Email", email), ("Mobile", phone), ("User ID", user["id"]),
             ("Subscription ID", sub_id), ("Cancelled at", when), ("Pro access until", ends)]
     table = "".join(f"<tr><td style='padding:4px 12px 4px 0;color:#666'>{e(k)}</td><td><b>{e(str(v))}</b></td></tr>" for k, v in rows)
     try:
         invoices._send_email({
-            "from": "ProfileIQ <noreply@profileiq.co.in>", "to": [config.OWNER_NOTIFY_EMAIL], "reply_to": user["email"],
-            "subject": f"[ProfileIQ] Subscription cancelled - {user['email']}"[:200],
+            "from": "ProfileIQ <noreply@profileiq.co.in>", "to": [config.OWNER_NOTIFY_EMAIL], "reply_to": email,
+            "subject": f"[ProfileIQ] Subscription cancelled - {email}"[:200],
             "html": f"<p><b>A subscriber cancelled their ProfileIQ Pro plan.</b> Renewal is switched off; they keep Pro until {e(ends)}.</p><table>{table}</table>",
         }, f"cancel-owner-{sub_id}")
         invoices._send_email({
-            "from": config.INVOICE_FROM, "to": [user["email"]], "reply_to": config.SUPPORT_EMAIL,
+            "from": config.INVOICE_FROM, "to": [email], "reply_to": config.SUPPORT_EMAIL,
             "subject": "Your ProfileIQ subscription is cancelled",
             "html": (f"<p>Hi {e(name) if name != '—' else 'there'},</p>"
                      f"<p>We've cancelled your ProfileIQ Pro subscription. It <b>won't renew</b>, and you'll keep Pro until <b>{e(ends)}</b>.</p>"

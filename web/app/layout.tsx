@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./legal.css";
+import "./admin.css";
 
 export const metadata: Metadata = {
   title: "ProfileIQ — AI Resume Intelligence",

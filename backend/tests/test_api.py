@@ -353,3 +353,85 @@ def test_cancel_succeeds_even_if_email_breaks(client, monkeypatch):
     monkeypatch.setattr(invoices, "_send_email", lambda p, k: (_ for _ in ()).throw(RuntimeError("boom")))
     client.state["profile"].update(plan="pro", pro_expires_at=FUTURE, razorpay_subscription_id="sub_123")
     assert client.post("/v1/billing/cancel").status_code == 200
+
+
+# ── admin ──
+ADMIN = {"id": "a1", "email": "lakshmikanthkr3@gmail.com"}
+UID = "6cd7dd96-4a82-416d-9b02-f469b1ac2105"
+
+
+@pytest.fixture
+def adm(client, monkeypatch):
+    from app import admin
+    main.app.dependency_overrides[auth.current_user] = lambda: ADMIN
+    db = {"profile": {"id": UID, "email": "d@x.com", "full_name": "Divya", "phone": "9876543210", "plan": "pro",
+                      "pro_expires_at": FUTURE, "subscription_status": "active", "razorpay_customer_id": "cust_1"},
+          "patches": [], "rzp": []}
+
+    class R:
+        def __init__(self, code=200, data=None, headers=None): self.status_code, self._d, self.headers = code, data, headers or {}
+        def json(self): return self._d
+
+    def fake_rest(path, **kw):
+        if kw.get("method") == "PATCH":
+            db["patches"].append(kw["json"]); db["profile"].update(kw["json"]); return R(204)
+        if path.startswith("invoices"): return R(200, [])
+        if "count=exact" in str(kw.get("headers")): return R(200, [], {"content-range": "0-0/7"})
+        return R(200, [dict(db["profile"])])
+    monkeypatch.setattr(admin, "_rest", fake_rest)
+
+    def fake_put(url, **kw):
+        db["rzp"].append((url, kw["json"])); return R(200, {})
+    monkeypatch.setattr(admin.requests, "put", fake_put)
+    monkeypatch.setattr(admin.requests, "get", lambda *a, **k: R(200, {"user_metadata": {"mobile": "9"}}))
+    monkeypatch.setattr(admin.config, "RAZORPAY_KEY_ID", "k"); monkeypatch.setattr(admin.config, "RAZORPAY_KEY_SECRET", "s")
+    client.db = db
+    return client
+
+
+def test_admin_requires_admin_email(client):
+    assert client.get("/v1/admin/users").status_code == 403           # USER is a@b.com, not an admin
+    assert client.get("/v1/admin/users").json()["ref"] == "not-admin"
+    assert client.patch(f"/v1/admin/users/{UID}", json={"full_name": "Hacker"}).status_code == 403
+
+
+def test_admin_requires_login():
+    assert TestClient(main.app).get("/v1/admin/me").status_code == 401
+
+
+def test_admin_lists_and_stats(adm):
+    assert adm.get("/v1/admin/me").json()["ok"] is True
+    users = adm.get("/v1/admin/users?q=div&filter=active").json()["users"]
+    assert users[0]["status"] == "active"
+    assert adm.get("/v1/admin/stats").json() == {"total": 7, "active": 7, "cancelled": 7}
+
+
+def test_admin_user_detail_and_status(adm):
+    adm.db["profile"]["subscription_status"] = "cancel_at_cycle_end"
+    assert adm.get(f"/v1/admin/users/{UID}").json()["user"]["status"] == "cancelled"
+    assert adm.get("/v1/admin/users/not-a-uuid").status_code == 400
+
+
+def test_admin_edit_updates_profile_and_razorpay(adm):
+    r = adm.patch(f"/v1/admin/users/{UID}", json={"full_name": "  Divya   Gowda ", "email": "New@Mail.com"})
+    assert r.status_code == 200
+    j = r.json()
+    assert j["user"]["full_name"] == "Divya Gowda" and j["user"]["email"] == "new@mail.com"
+    assert j["razorpay_updated"] is True and j["auth_updated"] is True and j["changed"] == ["email", "full_name"]
+    assert adm.db["rzp"][0][1] == {"name": "Divya Gowda", "email": "new@mail.com"}
+
+
+def test_admin_edit_validation(adm):
+    for body, ref in [({"email": "nope"}, "bad-email"), ({"full_name": "<b>"}, "bad-name"), ({"phone": "123"}, "bad-mobile"), ({}, "no-change")]:
+        r = adm.patch(f"/v1/admin/users/{UID}", json=body)
+        assert r.status_code == 422 and r.json()["ref"] == ref
+    assert adm.patch(f"/v1/admin/users/{UID}", json={"full_name": "Divya"}).json()["ref"] == "no-change"
+    assert adm.db["patches"] == []
+
+
+def test_cancel_email_uses_profile_email(client, monkeypatch):
+    sent = []
+    monkeypatch.setattr(main.billing.invoices, "_send_email", lambda p, k: sent.append(p) or True)
+    main.billing._notify_cancellation({"id": "u1", "email": "login@x.com"}, {"email": "fixed@x.com", "full_name": "N"}, "sub_1")
+    assert sent[0]["to"] == [main.config.OWNER_NOTIFY_EMAIL] and "fixed@x.com" in sent[0]["html"]
+    assert sent[1]["to"] == ["fixed@x.com"]

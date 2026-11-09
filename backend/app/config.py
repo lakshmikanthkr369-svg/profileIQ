@@ -28,3 +28,6 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 INVOICE_FROM = os.getenv("INVOICE_FROM", "ProfileIQ <support@profileiq.co.in>")
 SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "support@profileiq.co.in")
 OWNER_NOTIFY_EMAIL = os.getenv("OWNER_NOTIFY_EMAIL", "lakshmikanthkr3@gmail.com")
+
+# Admin page: comma-separated emails allowed to sign in to /admin (everyone else is refused)
+ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "lakshmikanthkr3@gmail.com").split(",") if e.strip()}

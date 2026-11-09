@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from . import auth, billing, config, invoices
+from . import admin, auth, billing, config, invoices
 from .ai import build_fresher_resume, do_rewrite, get_suggestions, score_resume
 from .ai_errors import describe_ai_error
 from .limits import check_ai_rate, check_rate
@@ -15,7 +15,7 @@ from .readers import extract_text
 from .resume_files import RESUME_TEMPLATES, make_docx, make_pdf, resume_preview_html
 
 app = FastAPI(title="ProfileIQ API", docs_url=None, redoc_url=None, openapi_url=None)
-app.add_middleware(CORSMiddleware, allow_origins=config.ALLOWED_ORIGINS, allow_methods=["GET", "POST"],
+app.add_middleware(CORSMiddleware, allow_origins=config.ALLOWED_ORIGINS, allow_methods=["GET", "POST", "PATCH"],
                    allow_headers=["Authorization", "Content-Type"], max_age=600)
 
 ALLOWED_EXT = (".pdf", ".doc", ".docx")
@@ -272,3 +272,35 @@ def support(body: SupportIn, user: dict = Depends(auth.current_user)):
     check_rate(f"support:{user['id']}", 5, 3600, "You've sent several messages already. Please wait a while before sending another.")
     invoices.submit_support(user, body.type, body.message)
     return {"ok": True}
+
+
+# ── Owner-only admin ──
+@app.get("/v1/admin/me")
+def admin_me(a: dict = Depends(admin.require_admin)):
+    return {"ok": True, "email": a["email"]}
+
+
+@app.get("/v1/admin/users")
+def admin_users(q: str = "", filter: str = "all", offset: int = 0, a: dict = Depends(admin.require_admin)):
+    return admin.list_users(q, filter, offset)
+
+
+@app.get("/v1/admin/stats")
+def admin_stats(a: dict = Depends(admin.require_admin)):
+    return admin.stats()
+
+
+@app.get("/v1/admin/users/{user_id}")
+def admin_user(user_id: str, a: dict = Depends(admin.require_admin)):
+    return admin.get_user(user_id)
+
+
+class AdminUserEdit(BaseModel):
+    full_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+
+
+@app.patch("/v1/admin/users/{user_id}")
+def admin_user_edit(user_id: str, body: AdminUserEdit, a: dict = Depends(admin.require_admin)):
+    return admin.update_user(a, user_id, body.model_dump())
